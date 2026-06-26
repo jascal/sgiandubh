@@ -37,7 +37,11 @@ struct Decision {
 
 static std::vector<Item> g_items;
 static std::string g_pkg, g_model;
-static double g_tau = 0.12; // abstain threshold (lexical Jaccard) — the bound: below this → abstain
+static double g_tau = 0.25; // faithful-match threshold (lexical Jaccard) — below this → fall through to retrieval/gram/abstain.
+                            // Default kept conservative so a single shared common word (~0.20, e.g. "law") can't trigger a
+                            // faithful answer (the old 0.12 let "De Morgan's law" wrongly match "excluded middle"). This and
+                            // the gates below are DEFAULTS, overridable per-deployment via flags (--tau, --answer-cos, …) —
+                            // tune them against a representative test set, not this small corpus.
 static souffle::SouffleProgram* g_prog = nullptr;
 static std::mutex g_engine_mu; // the embedded engine is a single stateful instance (purge/loadAll/run) — serialize it
 static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
@@ -54,6 +58,7 @@ static double g_answer_lex_tau = 0.18;    //   "  (lexical fallback)
 static double g_answer_margin = 0.20;     // top match must beat the mean cosine by this (off-domain = flat → reject)
 static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
 static bool g_answer_from_corpus = false; // --answer-from-corpus: return the best passage verbatim (retrieval-as-answer)
+static bool g_no_gram = false;            // --no-gram: disable the generative tail (faithful → retrieval → abstain only) — the strongest-trust config
 static bool g_repl = false;               // --repl: interactive stdin loop for local testing (no server)
 
 static bool stop(const std::string& w) {
@@ -299,7 +304,7 @@ static Answer answer(const std::string& user) {
         const Passage* gp = retrieve_answer(qw);                                        // retrieval-as-answer (strict + margin)
         if (gp) { body = gp->text; item_cite = gp->section; is_answer = true; is_retrieval = true; a.kind = "retrieved"; }
     }
-    if (!is_answer && g_gram.loaded) {
+    if (!is_answer && !g_no_gram && g_gram.loaded) {
         auto toks = Gram::tokenize(user);
         std::vector<std::string> cont = g_gram.in_domain(toks) ? g_gram.generate(toks, 24) : std::vector<std::string>{};
         if (!cont.empty()) { body = detok(cont); is_answer = true; is_generated = true; a.kind = "generated"; }
@@ -458,9 +463,18 @@ int main(int argc, char** argv) {
     std::vector<std::string> pos;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
+        auto fval = [&](double& dst) { if (i + 1 < argc) dst = std::atof(argv[++i]); };
         if (a == "--require-citation") g_require_citation = true;
         else if (a == "--answer-from-corpus") g_answer_from_corpus = true;
+        else if (a == "--no-gram") g_no_gram = true;
         else if (a == "--repl") g_repl = true;
+        // Tunable matching thresholds (defaults above are conservative; tune on a representative test set):
+        else if (a == "--tau") fval(g_tau);                       // faithful lexical-Jaccard match
+        else if (a == "--ground-cos") fval(g_cos_tau);            // min cosine to attach a supporting passage
+        else if (a == "--ground-lex") fval(g_ground_tau);         //   "  (lexical fallback)
+        else if (a == "--answer-cos") fval(g_answer_cos_tau);     // min cosine to RETURN a passage as the answer
+        else if (a == "--answer-lex") fval(g_answer_lex_tau);     //   "  (lexical fallback)
+        else if (a == "--answer-margin") fval(g_answer_margin);   // top match must beat the mean by this (off-domain reject)
         else pos.push_back(a);
     }
     g_pkg = pos.size() > 0 ? pos[0] : "package";
@@ -487,11 +501,14 @@ int main(int argc, char** argv) {
     load_wordvec(g_pkg + "/wordvec.txt");      // optional corpus embeddings (enables cosine grounding)
     load_knowledge(g_pkg + "/knowledge.tsv");  // optional grounding passages (vectors computed here)
     const char* gmode = g_knowledge.empty() ? "off" : (g_dim > 0 ? "vector" : "lexical");
+    const char* gram_state = g_no_gram ? "off(--no-gram)" : (g_gram.loaded ? "on" : "off");
     fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · grounding=%s%s%s%s · listening :%d\n",
-            g_items.size(), g_model.c_str(), g_gram.loaded ? "on" : "off", gmode,
+            g_items.size(), g_model.c_str(), gram_state, gmode,
             g_dim > 0 ? ("/" + std::to_string(g_dim) + "d").c_str() : "",
             g_answer_from_corpus ? " · retrieval-answer" : "",
             g_require_citation ? " · require-citation" : "", port);
+    fprintf(stderr, "sgiandubh: thresholds  faithful-tau=%.2f  answer-cos=%.2f  answer-lex=%.2f  answer-margin=%.2f  ground-cos=%.2f  ground-lex=%.2f  (override via flags)\n",
+            g_tau, g_answer_cos_tau, g_answer_lex_tau, g_answer_margin, g_cos_tau, g_ground_tau);
 
     if (g_repl) {  // local testing: read queries from stdin, print answers (no server)
         fprintf(stderr, "sgiandubh REPL — type a query; blank line or Ctrl-D to exit.\n");

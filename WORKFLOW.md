@@ -73,6 +73,15 @@ gram kernel, then abstain.
 Point any OpenAI client at it. In-scope → grounded/cited answer; out-of-scope → abstain (the bound, by construction).
 `--require-citation` refuses any answer it can't ground in a passage or attach a citation to — the strong mode for
 regulated/high-stakes domains: every served answer carries provenance, or it abstains.
+`--no-gram` disables the generative tail entirely (faithful → retrieval → abstain only) — the strongest-trust config:
+no n-gram continuations, so every served answer is a distilled item or a verbatim corpus passage, else it abstains.
+
+**Tunable matching thresholds** (defaults are conservative; *calibrate against a representative test set, not a toy
+corpus*). All are flags, printed at startup: `--tau` (faithful lexical-Jaccard match, default 0.25 — below this the
+query falls through to retrieval/gram/abstain, so a single shared common word can't trigger a wrong faithful answer),
+`--answer-cos` / `--answer-lex` / `--answer-margin` (the retrieval-as-answer gate: min cosine / lexical overlap, and
+how far the top passage must beat the mean — the off-domain reject), `--ground-cos` / `--ground-lex` (the bar to
+attach a supporting passage). Raise them to abstain more (precision), lower them to answer more (recall).
 
 **APIs** (verified against the official `openai` and `anthropic` SDKs):
 - OpenAI: `POST /v1/chat/completions`, `POST /v1/completions`, `GET /v1/models` — non-streaming + SSE `stream:true`,

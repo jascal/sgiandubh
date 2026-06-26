@@ -50,12 +50,24 @@ struct Gram {
         return loaded;
     }
 
-    // The bound: a query is in-domain only if a third of its content words are corpus vocabulary; else → abstain.
+    // The bound: a query is in-domain only if a MAJORITY of its content words are corpus vocabulary; else → abstain.
+    // Stopwords and short words are excluded first — otherwise common scaffolding ("what is the …") satisfies the gate
+    // and an out-of-corpus query ("De Morgan's law", whose only in-vocab tokens were "what"/"is") leaks into the gram
+    // and babbles. Counting only real content words makes the gate reflect actual domain membership.
     bool in_domain(const std::vector<std::string>& q) const {
         if (vocab.empty()) return false;
+        static const std::set<std::string> STOP = {
+            "the","is","are","a","an","of","to","in","on","for","and","or","not","with","as","by","at","from",
+            "that","this","it","its","what","whats","which","how","when","where","why","who","does","do","did",
+            "can","could","would","should","if","then","else","be","being","been","was","were","about","into",
+            "list","give","tell","show","me","my","you","your","please","explain","describe","define","name"};
         int known = 0, n = 0;
-        for (const auto& w : q) { if (w.size() < 2) continue; n++; if (vocab.count(lower(w))) known++; }
-        return n > 0 && known * 3 >= n;
+        for (const auto& w : q) {
+            std::string lw = lower(w);
+            if (lw.size() < 3 || STOP.count(lw)) continue;   // ignore scaffolding; judge on content words only
+            n++; if (vocab.count(lw)) known++;
+        }
+        return n > 0 && known * 2 >= n;                       // at least half the content words are corpus vocabulary
     }
 
     // Backoff-argmax decode: greedy, deterministic; stops on sentence-end or when the corpus has no continuation.
