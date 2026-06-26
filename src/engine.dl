@@ -9,6 +9,7 @@
 
 .decl logit(t:number, s:float)
 logit(T, S) :- candidate(T), S = sum W : { contrib(_, T, W) }.   // ⊗ = + : block contributions sum to the logit
+.output logit                                                    // per-candidate logits → host-side softmax (logprobs)
 
 .decl decide(t:number)
 decide(T) :- logit(T, S), S = max S2 : { logit(_, S2) }.          // ⊕ = max : the greedy (T=0) decode

@@ -34,7 +34,7 @@ This is the seam — it turns fieldrun's raw decisions into the package the serv
 
 ## Stage 4 — deploy
 ```bash
-./build/sgiandubh package build/engine 8080      # OpenAI-compatible, offline, no model, no GPU
+./build/sgiandubh package 8080      # OpenAI-compatible, offline, no model, no GPU
 ```
 Point any OpenAI client at it. In-scope → cited answer; out-of-scope → abstain (the bound, by construction).
 

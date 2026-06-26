@@ -1,19 +1,17 @@
 // sgiandubh — a small, standalone, OpenAI-compatible server over a Soufflé-compiled bounded expert.
 //
 // No model, no GPU, no fieldrun at runtime. Per request it: (1) lexically matches the query against the extracted
-// decision set, (2) runs the compiled Datalog engine to pick the answer, (3) replies in OpenAI /v1/chat/completions
-// shape — or abstains when nothing is in scope. The model's competence was distilled offline (by fieldrun) into the
-// `package/` facts; serving is match + a native semiring combine.
+// decision set, (2) runs the EMBEDDED Datalog engine (in-process, no spawn) to derive the decision + per-candidate
+// logits, (3) replies in OpenAI /v1/chat/completions shape — with a citation, and `logprobs` (calibrated confidence
+// + distractor mass, from the semiring's per-candidate logits) — or abstains when nothing is in scope.
 //
-// SCAFFOLD NOTE: this shells out to the compiled `engine` binary per request (process spawn). Correct + simple, but
-// the spawn is the one non-"fast" bit — the perf upgrade is to embed the generated SouffleProgram in-process (one
-// binary, no spawn). Tracked as the next increment.
+// The engine is the Soufflé-generated class for src/engine.dl, linked in (-D__EMBEDDED_SOUFFLE__). Built by build.sh.
 #include "httplib.h"
 #include "json.hpp"
-#include <array>
+#include "souffle/SouffleInterface.h"
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
+#include <cmath>
 #include <fstream>
 #include <set>
 #include <string>
@@ -24,9 +22,15 @@ struct Item {
     std::string id, question, citation, facts, answer;
     std::vector<std::string> options;
 };
+struct Decision {
+    int decide = -1;
+    std::vector<std::pair<int, double>> logits; // (candidate id, logit)
+};
+
 static std::vector<Item> g_items;
-static std::string g_pkg, g_engine, g_model;
-static double g_tau = 0.12; // abstain threshold (lexical Jaccard) — the bound: below this, off-material → abstain
+static std::string g_pkg, g_model;
+static double g_tau = 0.12; // abstain threshold (lexical Jaccard) — the bound: below this → abstain
+static souffle::SouffleProgram* g_prog = nullptr;
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -53,28 +57,54 @@ static double jaccard(const std::set<std::string>& a, const std::set<std::string
     return (double)inter / (double)(a.size() + b.size() - inter);
 }
 
-// Run the compiled Datalog engine on a facts dir; return the decided candidate id (-1 on failure).
-static int run_engine(const std::string& facts_dir) {
-    std::string cmd = g_engine + " -F " + facts_dir + " -D - 2>/dev/null";
-    FILE* p = popen(cmd.c_str(), "r");
-    if (!p) return -1;
-    std::array<char, 256> buf;
-    int decided = -1;
-    while (fgets(buf.data(), buf.size(), p)) {
-        std::string line(buf.data()), t;
-        for (char c : line) if (!std::isspace((unsigned char)c)) t += c;
-        if (t.empty()) continue;
-        try { decided = std::stoi(t); break; } catch (...) { /* header/divider line */ }
+// Run the EMBEDDED Datalog engine on a facts dir, in-process (no spawn). Returns the decided id + per-candidate logits.
+static Decision run_engine(const std::string& facts_dir) {
+    Decision r;
+    if (!g_prog) return r;
+    g_prog->purgeInputRelations();
+    g_prog->purgeInternalRelations();
+    g_prog->purgeOutputRelations();
+    g_prog->loadAll(facts_dir);
+    g_prog->run();
+    for (auto& t : *g_prog->getRelation("decide")) { souffle::RamSigned v; t >> v; r.decide = (int)v; }
+    for (auto& t : *g_prog->getRelation("logit")) {
+        souffle::RamSigned id; souffle::RamFloat s; t >> id >> s;
+        r.logits.emplace_back((int)id, (double)s);
     }
-    pclose(p);
-    return decided;
+    return r;
 }
 
-static json completion(const std::string& content, const std::string& finish, int ptoks) {
+// OpenAI logprobs (chat schema): the decided token + top_logprobs over the candidates (softmax of the logits).
+static json logprobs_of(const Decision& d, const Item& it) {
+    if (d.logits.empty()) return nullptr;
+    double m = -1e300;
+    for (auto& [id, s] : d.logits) m = std::max(m, s);
+    double Z = 0;
+    for (auto& [id, s] : d.logits) Z += std::exp(s - m);
+    double lnZ = std::log(Z);
+    auto label = [&](int id) -> std::string {
+        if (!it.options.empty() && id >= 0 && id < (int)it.options.size()) return it.options[id];
+        return "tok:" + std::to_string(id);
+    };
+    json top = json::array();
+    double declp = 0;
+    for (auto& [id, s] : d.logits) {
+        double lp = (s - m) - lnZ;
+        json e; e["token"] = label(id); e["logprob"] = lp;
+        top.push_back(e);
+        if (id == d.decide) declp = lp;
+    }
+    json entry; entry["token"] = label(d.decide); entry["logprob"] = declp; entry["top_logprobs"] = top;
+    json lp; lp["content"] = json::array({entry});
+    return lp;
+}
+
+static json completion(const std::string& content, const json& logprobs, int ptoks) {
     json choice;
     choice["index"] = 0;
     choice["message"] = {{"role", "assistant"}, {"content", content}};
-    choice["finish_reason"] = finish;
+    choice["finish_reason"] = "stop";
+    choice["logprobs"] = logprobs; // null when not applicable
     json r;
     r["id"] = "chatcmpl-sgiandubh";
     r["object"] = "chat.completion";
@@ -86,8 +116,10 @@ static json completion(const std::string& content, const std::string& finish, in
 
 int main(int argc, char** argv) {
     g_pkg = argc > 1 ? argv[1] : "package";
-    g_engine = argc > 2 ? argv[2] : "build/engine";
-    int port = argc > 3 ? std::stoi(argv[3]) : 8080;
+    int port = argc > 2 ? std::stoi(argv[2]) : 8080;
+
+    g_prog = souffle::ProgramFactory::newInstance("engine");
+    if (!g_prog) { fprintf(stderr, "sgiandubh: embedded engine 'engine' not found\n"); return 1; }
 
     std::ifstream f(g_pkg + "/index.json");
     if (!f) { fprintf(stderr, "sgiandubh: cannot open %s/index.json\n", g_pkg.c_str()); return 1; }
@@ -103,8 +135,8 @@ int main(int argc, char** argv) {
         if (it.contains("options")) for (const auto& o : it["options"]) x.options.push_back(o.get<std::string>());
         g_items.push_back(x);
     }
-    fprintf(stderr, "sgiandubh: %zu items · model=%s · engine=%s · listening :%d\n",
-            g_items.size(), g_model.c_str(), g_engine.c_str(), port);
+    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · listening :%d\n",
+            g_items.size(), g_model.c_str(), port);
 
     httplib::Server svr;
 
@@ -131,26 +163,21 @@ int main(int argc, char** argv) {
         }
 
         std::string content;
+        json lp = nullptr;
         if (hit && best >= g_tau) {
             const std::string cite = hit->citation.empty() ? "" : ("\n\n\xF0\x9F\x93\x96 Source: " + hit->citation);
-            if (!hit->answer.empty()) {
-                // generated answer distilled offline (faithful); the shipped facts are its engine certificate
-                content = hit->answer + cite;
-            } else if (!hit->options.empty()) {
-                // multiple-choice: the compiled engine decides live among the options
-                int d = run_engine(g_pkg + "/" + hit->facts);
-                content = (d >= 0 && d < (int)hit->options.size())
-                              ? ("The answer is " + hit->options[d] + "." + cite)
-                              : "(engine error)";
-            } else {
-                int d = run_engine(g_pkg + "/" + hit->facts);
-                content = "decide=" + std::to_string(d) + cite;
-            }
+            Decision d = hit->facts.empty() ? Decision{} : run_engine(g_pkg + "/" + hit->facts);
+            lp = logprobs_of(d, *hit);
+            if (!hit->answer.empty())
+                content = hit->answer + cite;                                   // generated answer (faithful)
+            else if (!hit->options.empty() && d.decide >= 0 && d.decide < (int)hit->options.size())
+                content = "The answer is " + hit->options[d.decide] + "." + cite; // MC: engine decides live
+            else
+                content = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)") + cite;
         } else {
-            // the bound: nothing in scope → abstain rather than confabulate
-            content = "That isn't covered in this material. Try rephrasing, or ask your teacher.";
+            content = "That isn't covered in this material. Try rephrasing, or ask your teacher."; // the bound
         }
-        res.set_content(completion(content, "stop", (int)qw.size()).dump(), "application/json");
+        res.set_content(completion(content, lp, (int)qw.size()).dump(), "application/json");
     });
 
     svr.listen("0.0.0.0", port);

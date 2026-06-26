@@ -32,10 +32,12 @@ used once, offline, to manufacture the expert; sgiandubh ships without it.
 
 ## Build & run
 ```bash
-./build.sh                              # souffle -o engine  +  g++ server  →  build/{engine,sgiandubh}
-./build/sgiandubh package build/engine 8080
+./build.sh                              # souffle -g engine + g++ → ONE binary (engine embedded, ~1.2 MB)
+./build/sgiandubh package 8080          # OpenAI server; no model, no GPU, no spawn
 curl localhost:8080/v1/chat/completions -d '{"messages":[{"role":"user","content":"smallest unit of an organism?"}]}'
 ```
+Answers in-scope come back with a citation and `logprobs` (the candidate distribution = confidence + distractor
+mass); off-scope abstains.
 Needs `souffle` (with compiled-mode headers — see fieldrun `SOUFFLE.md` §1.1) and `g++` (C++17). Header deps
 (`cpp-httplib`, `nlohmann/json`) vendored in `third_party/`.
 
@@ -46,10 +48,11 @@ of candidates — microseconds, MBs of RAM, no neural forward. Size lives in the
 model it came from.
 
 ## Status
-**Scaffold.** Engine compiles to a native binary (verified, 1-ULP faithful to the interpreter); the server matches +
-decides + cites + abstains over a toy package. Next: in-process libsouffle (drop the per-request spawn), the log-semiring
-functor (`logprobs`), the gram kernel (generalization), the pruned tokenizer, streaming, and consuming fieldrun's real
-emitted package.
+Working: the engine is **embedded in-process** (one binary, no spawn; 1-ULP faithful to the interpreter); the server
+matches → decides → cites → abstains, and emits **`logprobs`** (host-side softmax over the candidate logits =
+confidence + distractor mass). Generic `tools/dl2package.py` converts fieldrun's `.dl` into a package (see
+[WORKFLOW.md](./WORKFLOW.md)). Next: the **gram kernel** (generalize past lexical match), a **vocab-pruned tokenizer**
+(smaller), **streaming**, and consuming fieldrun's real emitted package.
 
 ## Licence note
 Code: see `LICENSE`. The `package/` demo facts are hand-built from OpenStax Anatomy & Physiology 2e (CC BY-NC-SA) — a
