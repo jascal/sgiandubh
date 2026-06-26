@@ -47,12 +47,17 @@ of candidates — microseconds, MBs of RAM, no neural forward. Size lives in the
 **vocabulary-pruned tokenizer** (a bounded expert emits only its material's tokens) — a few MB total, vs the GBs of the
 model it came from.
 
+## Routing (per request)
+1. **faithful** — query matches a distilled item → replay its answer (the model's exact decision) + citation + `logprobs`.
+2. **gram** — in-domain but no distilled answer → the **gram kernel** continues the corpus text (n-gram + induction),
+   bounded (only continuations the corpus supports), marked generative.
+3. **abstain** — out of domain (vocab-overlap gate fails) → refuses, by construction.
+
 ## Status
-Working: the engine is **embedded in-process** (one binary, no spawn; 1-ULP faithful to the interpreter); the server
-matches → decides → cites → abstains, and emits **`logprobs`** (host-side softmax over the candidate logits =
-confidence + distractor mass). Generic `tools/dl2package.py` converts fieldrun's `.dl` into a package (see
-[WORKFLOW.md](./WORKFLOW.md)). Next: the **gram kernel** (generalize past lexical match), a **vocab-pruned tokenizer**
-(smaller), **streaming**, and consuming fieldrun's real emitted package.
+Working: embedded in-process engine (one ~1.2 MB binary, no spawn; 1-ULP faithful); cite + abstain; **`logprobs`**
+(confidence + distractor mass); the **gram kernel** generative fallback (`tools/build_gram.py`); generic
+`tools/dl2package.py` (.dl → package). See [WORKFLOW.md](./WORKFLOW.md). Next: a **vocab-pruned tokenizer** (smaller),
+**streaming**, and consuming fieldrun's real emitted package.
 
 ## Licence note
 Code: see `LICENSE`. The `package/` demo facts are hand-built from OpenStax Anatomy & Physiology 2e (CC BY-NC-SA) — a

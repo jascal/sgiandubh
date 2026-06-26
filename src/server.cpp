@@ -8,6 +8,7 @@
 // The engine is the Soufflé-generated class for src/engine.dl, linked in (-D__EMBEDDED_SOUFFLE__). Built by build.sh.
 #include "httplib.h"
 #include "json.hpp"
+#include "gram.h"
 #include "souffle/SouffleInterface.h"
 #include <algorithm>
 #include <cctype>
@@ -31,6 +32,7 @@ static std::vector<Item> g_items;
 static std::string g_pkg, g_model;
 static double g_tau = 0.12; // abstain threshold (lexical Jaccard) — the bound: below this → abstain
 static souffle::SouffleProgram* g_prog = nullptr;
+static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -135,8 +137,9 @@ int main(int argc, char** argv) {
         if (it.contains("options")) for (const auto& o : it["options"]) x.options.push_back(o.get<std::string>());
         g_items.push_back(x);
     }
-    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · listening :%d\n",
-            g_items.size(), g_model.c_str(), port);
+    g_gram.load(g_pkg + "/gram"); // optional generative fallback
+    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · listening :%d\n",
+            g_items.size(), g_model.c_str(), g_gram.loaded ? "on" : "off", port);
 
     httplib::Server svr;
 
@@ -174,6 +177,13 @@ int main(int argc, char** argv) {
                 content = "The answer is " + hit->options[d.decide] + "." + cite; // MC: engine decides live
             else
                 content = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)") + cite;
+        } else if (g_gram.loaded) {
+            // no distilled answer → generative fallback, bounded to the corpus (gram kernel); abstain if off-domain
+            auto toks = Gram::tokenize(user);
+            std::vector<std::string> cont = g_gram.in_domain(toks) ? g_gram.generate(toks, 24) : std::vector<std::string>{};
+            content = cont.empty()
+                          ? "That isn't covered in this material. Try rephrasing, or ask your teacher."
+                          : detok(cont) + "\n\n(generated from the material \xE2\x80\x94 gram kernel)";
         } else {
             content = "That isn't covered in this material. Try rephrasing, or ask your teacher."; // the bound
         }

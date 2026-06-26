@@ -27,9 +27,17 @@ python tools/dl2package.py --manifest manifest.json --out package
 ```
 This is the seam — it turns fieldrun's raw decisions into the package the server consumes. Generic; no domain logic.
 
+## Stage 2.5 — gram kernel (optional, generative tail)
+```bash
+python tools/build_gram.py --corpus domain.txt --out package/gram   # n-gram KB + vocab from the corpus
+```
+Adds generative coverage: in-domain queries with no distilled answer get a corpus-bounded continuation instead of an
+abstain. Built from the corpus text alone (no model). Routing at serve time: **faithful** (distilled item) →
+**gram** (in-domain continuation) → **abstain** (out of domain).
+
 ## Stage 3 — build (sgiandubh)
 ```bash
-./build.sh        # souffle -o engine  +  g++ server  →  build/{engine, sgiandubh}  (~1.4 MB)
+./build.sh        # souffle -g engine + g++  →  ONE binary (engine embedded), ~1.2 MB
 ```
 
 ## Stage 4 — deploy
