@@ -38,6 +38,14 @@ Adds generative coverage: in-domain queries with no distilled answer get a corpu
 abstain. Built from the corpus text alone (no model). Routing at serve time: **faithful** (distilled item) →
 **gram** (in-domain continuation) → **abstain** (out of domain).
 
+## Stage 2.6 — grounding (optional, the publishing win)
+```bash
+python tools/build_grounding.py --corpus knowledge.txt --out package   # → package/knowledge.tsv
+```
+Attaches the best-matching passage from the owner's **own content** (verbatim + section) to EVERY answer — faithful
+and generative alike — so each answer is grounded in their material, not just labeled. Built from the corpus text
+alone (no model). Lexical retrieval now; embeddings later.
+
 ## Stage 3 — build (sgiandubh)
 ```bash
 ./build.sh        # souffle -g engine + g++  →  ONE binary (engine embedded), ~1.2 MB
@@ -45,9 +53,11 @@ abstain. Built from the corpus text alone (no model). Routing at serve time: **f
 
 ## Stage 4 — deploy
 ```bash
-./build/sgiandubh package 8080      # OpenAI-compatible, offline, no model, no GPU
+./build/sgiandubh package 8080 [--require-citation]   # OpenAI-compatible, offline, no model, no GPU
 ```
-Point any OpenAI client at it. In-scope → cited answer; out-of-scope → abstain (the bound, by construction).
+Point any OpenAI client at it. In-scope → grounded/cited answer; out-of-scope → abstain (the bound, by construction).
+`--require-citation` refuses any answer it can't ground in a passage or attach a citation to — the strong mode for
+regulated/high-stakes domains: every served answer carries provenance, or it abstains.
 
 ## The package contract (`package/`)
 `index.json`:
@@ -60,10 +70,13 @@ Point any OpenAI client at it. In-scope → cited answer; out-of-scope → absta
 ```
 `<facts dir>/candidate.facts` (one candidate id per line) and `<facts dir>/contrib.facts`
 (`block <TAB> id <TAB> weight`) — the decision the compiled Soufflé engine re-derives as the certificate.
+`knowledge.tsv` (optional): `section <TAB> passage` — the owner's content, for grounding.
+`gram/` (optional): the n-gram KB for the generative tail.
 
 ## Properties (all inherent, not bolted on)
 - **Bounded** — answers its material, abstains elsewhere; off-domain is structurally unanswerable, not filtered.
-- **Cited** — every answer carries its source (from the manifest / fieldrun's citations).
+- **Grounded** — every answer carries the verbatim passage from the owner's content it's supported by (+ section);
+  `--require-citation` refuses anything it can't ground or cite.
 - **Auditable** — the answer is (or is certified by) a Datalog decision; `Σ block == logit`.
 - **Small & fast** — a few-MB native binary, microsecond decisions, no model/GPU at runtime.
 

@@ -2,8 +2,9 @@
 //
 // No model, no GPU, no fieldrun at runtime. Per request it: (1) lexically matches the query against the extracted
 // decision set, (2) runs the EMBEDDED Datalog engine (in-process, no spawn) to derive the decision + per-candidate
-// logits, (3) replies in OpenAI /v1/chat/completions shape — with a citation, and `logprobs` (calibrated confidence
-// + distractor mass, from the semiring's per-candidate logits) — or abstains when nothing is in scope.
+// logits, (3) replies in OpenAI /v1/chat/completions shape — grounded in the owner's content (the verbatim
+// supporting passage + section), with `logprobs` (confidence + distractor mass) — or abstains when out of scope.
+// With --require-citation it abstains on any answer it can't ground or cite (the strong regulated/high-stakes mode).
 //
 // The engine is the Soufflé-generated class for src/engine.dl, linked in (-D__EMBEDDED_SOUFFLE__). Built by build.sh.
 #include "httplib.h"
@@ -17,6 +18,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 using json = nlohmann::json;
 
@@ -35,6 +37,12 @@ static double g_tau = 0.12; // abstain threshold (lexical Jaccard) — the bound
 static souffle::SouffleProgram* g_prog = nullptr;
 static std::mutex g_engine_mu; // the embedded engine is a single stateful instance (purge/loadAll/run) — serialize it
 static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
+
+// Grounding: the owner's corpus passages, so every answer can carry the verbatim source it's supported by.
+struct Passage { std::string section, text; std::set<std::string> w; };
+static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (optional)
+static double g_ground_tau = 0.10;        // min lexical overlap to ground an answer in a passage
+static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -59,6 +67,32 @@ static double jaccard(const std::set<std::string>& a, const std::set<std::string
     size_t inter = 0;
     for (const auto& x : a) if (b.count(x)) inter++;
     return (double)inter / (double)(a.size() + b.size() - inter);
+}
+
+// Grounding passages (package/knowledge.tsv: `section <TAB> passage`). The owner's content, verbatim.
+static void load_knowledge(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        auto tab = line.find('\t');
+        if (tab == std::string::npos) continue;
+        Passage p;
+        p.section = line.substr(0, tab);
+        p.text = line.substr(tab + 1);
+        p.w = words(p.text);
+        if (!p.w.empty()) g_knowledge.push_back(std::move(p));
+    }
+}
+// Best supporting passage for a cue (query + answer words), or nullptr if nothing clears g_ground_tau.
+static const Passage* ground(const std::set<std::string>& cue) {
+    const Passage* best = nullptr;
+    double bs = g_ground_tau;
+    for (const auto& p : g_knowledge) {
+        double s = jaccard(cue, p.w);
+        if (s > bs) { bs = s; best = &p; }
+    }
+    return best;
 }
 
 // Run the EMBEDDED Datalog engine on a facts dir, in-process (no spawn). Returns the decided id + per-candidate logits.
@@ -135,8 +169,14 @@ static json completion(const std::string& content, const json& logprobs, int pto
 }
 
 int main(int argc, char** argv) {
-    g_pkg = argc > 1 ? argv[1] : "package";
-    int port = argc > 2 ? std::stoi(argv[2]) : 8080;
+    std::vector<std::string> pos;
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        if (a == "--require-citation") g_require_citation = true;
+        else pos.push_back(a);
+    }
+    g_pkg = pos.size() > 0 ? pos[0] : "package";
+    int port = pos.size() > 1 ? std::stoi(pos[1]) : 8080;
 
     g_prog = souffle::ProgramFactory::newInstance("engine");
     if (!g_prog) { fprintf(stderr, "sgiandubh: embedded engine 'engine' not found\n"); return 1; }
@@ -156,8 +196,10 @@ int main(int argc, char** argv) {
         g_items.push_back(x);
     }
     g_gram.load(g_pkg + "/gram"); // optional generative fallback
-    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · listening :%d\n",
-            g_items.size(), g_model.c_str(), g_gram.loaded ? "on" : "off", port);
+    load_knowledge(g_pkg + "/knowledge.tsv"); // optional grounding passages
+    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · grounding=%s%s · listening :%d\n",
+            g_items.size(), g_model.c_str(), g_gram.loaded ? "on" : "off",
+            g_knowledge.empty() ? "off" : "on", g_require_citation ? " · require-citation" : "", port);
 
     httplib::Server svr;
 
@@ -183,27 +225,51 @@ int main(int argc, char** argv) {
             if (s > best) { best = s; hit = &it; }
         }
 
-        std::string content;
+        static const std::string ABSTAIN = "That isn't covered in this material. Try rephrasing, or ask your teacher.";
+        std::string answer_body, item_cite;
+        bool is_answer = false, is_generated = false;
         json lp = nullptr;
         if (hit && best >= g_tau) {
-            const std::string cite = hit->citation.empty() ? "" : ("\n\n\xF0\x9F\x93\x96 Source: " + hit->citation);
+            item_cite = hit->citation;
             Decision d = hit->facts.empty() ? Decision{} : run_engine(g_pkg + "/" + hit->facts);
             lp = logprobs_of(d, *hit);
             if (!hit->answer.empty())
-                content = hit->answer + cite;                                   // generated answer (faithful)
+                answer_body = hit->answer;                                          // generated answer (faithful)
             else if (!hit->options.empty() && d.decide >= 0 && d.decide < (int)hit->options.size())
-                content = "The answer is " + hit->options[d.decide] + "." + cite; // MC: engine decides live
+                answer_body = "The answer is " + hit->options[d.decide] + ".";       // MC: engine decides live
             else
-                content = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)") + cite;
+                answer_body = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)");
+            is_answer = true;
         } else if (g_gram.loaded) {
             // no distilled answer → generative fallback, bounded to the corpus (gram kernel); abstain if off-domain
             auto toks = Gram::tokenize(user);
             std::vector<std::string> cont = g_gram.in_domain(toks) ? g_gram.generate(toks, 24) : std::vector<std::string>{};
-            content = cont.empty()
-                          ? "That isn't covered in this material. Try rephrasing, or ask your teacher."
-                          : detok(cont) + "\n\n(generated from the material \xE2\x80\x94 gram kernel)";
+            if (!cont.empty()) { answer_body = detok(cont); is_answer = true; is_generated = true; }
+        }
+
+        std::string content;
+        if (is_answer) {
+            // Ground the answer in the owner's content: attach the best supporting passage verbatim (+ section).
+            std::set<std::string> cue = qw;
+            auto aw = words(answer_body);
+            cue.insert(aw.begin(), aw.end());
+            const Passage* gp = g_knowledge.empty() ? nullptr : ground(cue);
+            std::string prov;
+            if (gp)
+                prov = "\n\n\xF0\x9F\x93\x96 From the material" +
+                       (gp->section.empty() ? std::string() : " (\xC2\xA7" + gp->section + ")") +
+                       ": \"" + gp->text + "\"";
+            else if (!item_cite.empty())
+                prov = "\n\n\xF0\x9F\x93\x96 Source: " + item_cite;
+            bool cited = (gp != nullptr) || !item_cite.empty();
+            if (g_require_citation && !cited) {
+                content = ABSTAIN;                                                   // no provenance → refuse
+                lp = nullptr;
+            } else {
+                content = answer_body + prov + (is_generated && !gp ? "\n\n(generated from the material)" : "");
+            }
         } else {
-            content = "That isn't covered in this material. Try rephrasing, or ask your teacher."; // the bound
+            content = ABSTAIN;                                                       // the bound
         }
         if (!body.value("stream", false)) {
             res.set_content(completion(content, lp, (int)qw.size()).dump(), "application/json");
