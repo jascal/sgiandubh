@@ -1,0 +1,20 @@
+{
+  "model": "sgiandubh-anatomy-ch1",
+  "_source": "demo facts hand-built from OpenStax Anatomy & Physiology 2e, Ch.1 (CC BY-NC-SA) — placeholder until fieldrun emits the real extracted package",
+  "items": [
+    {
+      "id": "q8",
+      "question": "What is the smallest independently functioning biological unit of an organism?",
+      "options": ["cell", "molecule", "organ", "tissue"],
+      "citation": "Anatomy & Physiology 2e §1.2 (Structural Organization)",
+      "facts": "ch1_q8"
+    },
+    {
+      "id": "q19",
+      "question": "Which normal physiologic process uses a positive feedback loop?",
+      "options": ["childbirth", "blood pressure regulation", "temperature regulation", "fluid balance"],
+      "citation": "Anatomy & Physiology 2e §1.5 (Homeostasis)",
+      "facts": "ch1_q19"
+    }
+  ]
+}

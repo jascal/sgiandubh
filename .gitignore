@@ -1,0 +1,4 @@
+/build/
+*.o
+*.cpp.bak
+souffle-compile-*

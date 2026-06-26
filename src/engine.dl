@@ -1,0 +1,15 @@
+// sgiandubh decode engine — the semiring combine, compiled by Soufflé to a native binary (`souffle -o`).
+// Input facts (from the extracted expert package): the candidate set + each residual block's contribution.
+// Output: decide = argmax candidate (the (max,+) tropical decode). Swap the ⊕ to log-sum-exp (a functor) for
+// the full distribution / confidence — see README. This file is the *certificate* and, compiled, the *engine*.
+.decl candidate(t:number)
+.input candidate
+.decl contrib(block:symbol, t:number, w:float)
+.input contrib
+
+.decl logit(t:number, s:float)
+logit(T, S) :- candidate(T), S = sum W : { contrib(_, T, W) }.   // ⊗ = + : block contributions sum to the logit
+
+.decl decide(t:number)
+decide(T) :- logit(T, S), S = max S2 : { logit(_, S2) }.          // ⊕ = max : the greedy (T=0) decode
+.output decide
