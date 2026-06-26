@@ -369,6 +369,12 @@ int main(int argc, char** argv) {
             });
     });
 
+    // httplib defaults to 5 requests/connection — far too low for OpenAI clients that pool connections (the cap
+    // forces a reconnect every 5 calls). Raise it so a pooled connection serves many requests; TCP_NODELAY drops
+    // Nagle latency on these small request/response round-trips.
+    svr.set_keep_alive_max_count(1000);
+    svr.set_keep_alive_timeout(30);
+    svr.set_tcp_nodelay(true);
     svr.listen("0.0.0.0", port);
     return 0;
 }
