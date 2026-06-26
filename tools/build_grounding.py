@@ -72,6 +72,7 @@ def main():
     ap.add_argument("--min-len", type=int, default=20, help="drop passages shorter than this (chars)")
     ap.add_argument("--dim", type=int, default=64, help="embedding dim (0 = lexical only, no wordvec.txt)")
     ap.add_argument("--vocab-cap", type=int, default=4000)
+    ap.add_argument("--no-split", action="store_true", help="treat each line as one passage (don't split sentences)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -83,7 +84,7 @@ def main():
                 continue
             m = SEC.match(line)
             sec, text = (m.group(1).strip(), m.group(2).strip()) if m else ("", line)
-            for sent in SENT.split(text):
+            for sent in ([text] if a.no_split else SENT.split(text)):
                 sent = sent.strip()
                 if len(sent) >= a.min_len:
                     w.write(f"{sec}\t{sent}\n")

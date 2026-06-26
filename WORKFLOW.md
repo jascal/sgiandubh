@@ -12,6 +12,14 @@ it. Nothing in the pipeline is domain-specific — the corpus *is* the configura
    (+ citations)            (candidate / contrib / predicted)    ──►  ./sgiandubh  →  OpenAI /v1/chat/completions
 ```
 
+## Two ways to build (the model is optional)
+- **Model-free** (fastest — specs, manuals, structured references): *skip fieldrun.* Turn the source into passages,
+  then `build_grounding` + `build_gram`, and serve with `--answer-from-corpus` (return the best-matching passage
+  verbatim, cited) → a bounded, grounded, cited expert with **no model, no GPU**. Example structured-source adapter:
+  `tools/normrules2package.py` (RISC-V `norm-rules.json` → package; each normative rule becomes a citable passage).
+- **Model-distilled** (Stages 1–4 below): run fieldrun to add *model-reasoned* answers with `logprobs` + a Datalog
+  certificate — the high-stakes/auditable tier, layered on top of (or instead of) retrieval.
+
 ## Stage 1 — extract (fieldrun, with a GPU-free CPU box; run once)
 ```bash
 fieldrun convert --model <hf-id|dir> --arch <arch> --dtype int4 -o bundles/m
@@ -57,8 +65,11 @@ them); quality scales with corpus size, and pretrained vectors (same file format
 
 ## Stage 4 — deploy
 ```bash
-./build/sgiandubh package 8080 [--require-citation]   # OpenAI-compatible, offline, no model, no GPU
+./build/sgiandubh package 8080 [--answer-from-corpus] [--require-citation]   # OpenAI-compatible, offline, no GPU
 ```
+`--answer-from-corpus`: when no distilled item matches, return the best corpus passage **verbatim** (cited) instead
+of generating — the safest mode for specs/manuals (the answer is literally the source text). Falls through to the
+gram kernel, then abstain.
 Point any OpenAI client at it. In-scope → grounded/cited answer; out-of-scope → abstain (the bound, by construction).
 `--require-citation` refuses any answer it can't ground in a passage or attach a citation to — the strong mode for
 regulated/high-stakes domains: every served answer carries provenance, or it abstains.

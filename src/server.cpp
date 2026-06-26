@@ -48,6 +48,7 @@ static int g_dim = 0;                      // embedding dim (>0 once wordvec.txt
 static double g_ground_tau = 0.10;        // min lexical overlap to ground (lexical fallback)
 static double g_cos_tau = 0.35;           // min cosine to ground (vector path)
 static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
+static bool g_answer_from_corpus = false; // --answer-from-corpus: return the best passage verbatim (retrieval-as-answer)
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -229,6 +230,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--require-citation") g_require_citation = true;
+        else if (a == "--answer-from-corpus") g_answer_from_corpus = true;
         else pos.push_back(a);
     }
     g_pkg = pos.size() > 0 ? pos[0] : "package";
@@ -255,9 +257,10 @@ int main(int argc, char** argv) {
     load_wordvec(g_pkg + "/wordvec.txt");      // optional corpus embeddings (enables cosine grounding)
     load_knowledge(g_pkg + "/knowledge.tsv");  // optional grounding passages (vectors computed here)
     const char* gmode = g_knowledge.empty() ? "off" : (g_dim > 0 ? "vector" : "lexical");
-    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · grounding=%s%s%s · listening :%d\n",
+    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · grounding=%s%s%s%s · listening :%d\n",
             g_items.size(), g_model.c_str(), g_gram.loaded ? "on" : "off", gmode,
             g_dim > 0 ? ("/" + std::to_string(g_dim) + "d").c_str() : "",
+            g_answer_from_corpus ? " · retrieval-answer" : "",
             g_require_citation ? " · require-citation" : "", port);
 
     httplib::Server svr;
@@ -284,9 +287,9 @@ int main(int argc, char** argv) {
             if (s > best) { best = s; hit = &it; }
         }
 
-        static const std::string ABSTAIN = "That isn't covered in this material. Try rephrasing, or ask your teacher.";
+        static const std::string ABSTAIN = "That isn't covered in this material. Try rephrasing your question.";
         std::string answer_body, item_cite;
-        bool is_answer = false, is_generated = false;
+        bool is_answer = false, is_generated = false, is_retrieval = false;
         json lp = nullptr;
         if (hit && best >= g_tau) {
             item_cite = hit->citation;
@@ -299,8 +302,15 @@ int main(int argc, char** argv) {
             else
                 answer_body = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)");
             is_answer = true;
-        } else if (g_gram.loaded) {
-            // no distilled answer → generative fallback, bounded to the corpus (gram kernel); abstain if off-domain
+        }
+        if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
+            // retrieval-as-answer: return the best-matching passage verbatim, cited (safest for specs/manuals — no
+            // generation, the answer IS the owner's text).
+            const Passage* gp = ground(qw);
+            if (gp) { answer_body = gp->text; item_cite = gp->section; is_answer = true; is_retrieval = true; }
+        }
+        if (!is_answer && g_gram.loaded) {
+            // no distilled/retrieved answer → generative fallback, bounded to the corpus (gram kernel)
             auto toks = Gram::tokenize(user);
             std::vector<std::string> cont = g_gram.in_domain(toks) ? g_gram.generate(toks, 24) : std::vector<std::string>{};
             if (!cont.empty()) { answer_body = detok(cont); is_answer = true; is_generated = true; }
@@ -308,18 +318,22 @@ int main(int argc, char** argv) {
 
         std::string content;
         if (is_answer) {
-            // Ground the answer in the owner's content: attach the best supporting passage verbatim (+ section).
-            std::set<std::string> cue = qw;
-            auto aw = words(answer_body);
-            cue.insert(aw.begin(), aw.end());
-            const Passage* gp = g_knowledge.empty() ? nullptr : ground(cue);
+            // For faithful/gram answers, attach the best supporting passage (grounding). A retrieval answer already
+            // IS a passage — just cite it (its section/rule id), don't re-attach.
+            const Passage* gp = nullptr;
+            if (!is_retrieval && !g_knowledge.empty()) {
+                std::set<std::string> cue = qw;
+                auto aw = words(answer_body);
+                cue.insert(aw.begin(), aw.end());
+                gp = ground(cue);
+            }
             std::string prov;
             if (gp)
                 prov = "\n\n\xF0\x9F\x93\x96 From the material" +
                        (gp->section.empty() ? std::string() : " (\xC2\xA7" + gp->section + ")") +
                        ": \"" + gp->text + "\"";
             else if (!item_cite.empty())
-                prov = "\n\n\xF0\x9F\x93\x96 Source: " + item_cite;
+                prov = "\n\n\xF0\x9F\x93\x96 " + std::string(is_retrieval ? "" : "Source: ") + item_cite;
             bool cited = (gp != nullptr) || !item_cite.empty();
             if (g_require_citation && !cited) {
                 content = ABSTAIN;                                                   // no provenance → refuse
