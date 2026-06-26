@@ -23,12 +23,19 @@ STEP = re.compile(r'(\d+)\.dl$')           # trailing step number in a filename
 PROMPT = re.compile(r'p(\d+)_\d+\.dl$')    # --export-logic-corpus --out naming: p{prompt}_{step}.dl
 
 
+# fieldrun writes token text Rust-debug-escaped ({:?}) in the .dl comment, so a newline token reads as a literal
+# "\n". Undo those escapes (real Unicode like § or 📖 is left untouched — {:?} only escapes \n \t \r " \).
+_ESC = {'n': '\n', 't': '\t', 'r': '\r', '"': '"', '\\': '\\', '0': '\0', "'": "'"}
+def _unescape(s):
+    return re.sub(r'\\(.)', lambda m: _ESC.get(m.group(1), m.group(1)), s)
+
+
 def parse_dl(path):
     txt = open(path, encoding="utf-8").read()
     cands = [int(x) for x in CAND.findall(txt)]
     contribs = [(b, int(t), float(w)) for b, t, w in CONTRIB.findall(txt)]
     m = PRED.search(txt)
-    return cands, contribs, (m.group(1) if m else "")
+    return cands, contribs, (_unescape(m.group(1)) if m else "")
 
 
 def build_item(out, item_id, query, citation, dl_files):
