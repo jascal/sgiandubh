@@ -14,7 +14,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <ctime>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -46,9 +48,13 @@ static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (
 static std::unordered_map<std::string, std::vector<float>> g_wordvec; // corpus word embeddings (package/wordvec.txt)
 static int g_dim = 0;                      // embedding dim (>0 once wordvec.txt is loaded → cosine grounding)
 static double g_ground_tau = 0.10;        // min lexical overlap to ground (lexical fallback)
-static double g_cos_tau = 0.35;           // min cosine to ground (vector path)
+static double g_cos_tau = 0.35;           // min cosine to ground (attach a supporting passage)
+static double g_answer_cos_tau = 0.50;    // stricter bar to RETURN a passage AS the answer (retrieval-answer)
+static double g_answer_lex_tau = 0.18;    //   "  (lexical fallback)
+static double g_answer_margin = 0.20;     // top match must beat the mean cosine by this (off-domain = flat → reject)
 static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
 static bool g_answer_from_corpus = false; // --answer-from-corpus: return the best passage verbatim (retrieval-as-answer)
+static bool g_repl = false;               // --repl: interactive stdin loop for local testing (no server)
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -128,12 +134,14 @@ static void load_knowledge(const std::string& path) {
     }
 }
 // Best supporting passage for a cue (query + answer words): cosine over embeddings if loaded, else lexical Jaccard.
-static const Passage* ground(const std::set<std::string>& cue) {
+static const Passage* ground(const std::set<std::string>& cue, double cos_tau = -1, double lex_tau = -1) {
+    if (cos_tau < 0) cos_tau = g_cos_tau;
+    if (lex_tau < 0) lex_tau = g_ground_tau;
     if (g_dim > 0) {
         std::vector<float> qv = embed(cue);
         if (!qv.empty()) {
             const Passage* best = nullptr;
-            double bs = g_cos_tau;
+            double bs = cos_tau;
             for (const auto& p : g_knowledge) {
                 if ((int)p.vec.size() != g_dim) continue;
                 double s = 0;
@@ -144,12 +152,35 @@ static const Passage* ground(const std::set<std::string>& cue) {
         }
     }
     const Passage* best = nullptr;
-    double bs = g_ground_tau;
+    double bs = lex_tau;
     for (const auto& p : g_knowledge) {
         double s = jaccard(cue, p.w);
         if (s > bs) { bs = s; best = &p; }
     }
     return best;
+}
+
+// Retrieve the best passage to return AS the answer, with a MARGIN gate: the top match must stand out from the field.
+// An off-domain query produces a flat, uniformly-mediocre cosine profile (no clear winner) → nullptr → abstain.
+static const Passage* retrieve_answer(const std::set<std::string>& qw) {
+    if (g_knowledge.empty()) return nullptr;
+    if (g_dim > 0) {
+        std::vector<float> qv = embed(qw);
+        if (qv.empty()) return nullptr;
+        const Passage* best = nullptr;
+        double bs = -2.0, sum = 0.0;
+        int n = 0;
+        for (const auto& p : g_knowledge) {
+            if ((int)p.vec.size() != g_dim) continue;
+            double s = 0;
+            for (int i = 0; i < g_dim; i++) s += (double)qv[i] * p.vec[i];
+            sum += s; n++;
+            if (s > bs) { bs = s; best = &p; }
+        }
+        double mean = n ? sum / n : 0.0;
+        return (best && bs >= g_answer_cos_tau && (bs - mean) >= g_answer_margin) ? best : nullptr;
+    }
+    return ground(qw, g_answer_cos_tau, g_answer_lex_tau);  // lexical fallback (jaccard is already discriminative)
 }
 
 // Run the EMBEDDED Datalog engine on a facts dir, in-process (no spawn). Returns the decided id + per-candidate logits.
@@ -205,6 +236,7 @@ static json stream_chunk(const json& delta, const char* finish, const json& lp) 
     json c;
     c["id"] = "chatcmpl-sgiandubh";
     c["object"] = "chat.completion.chunk";
+    c["created"] = (long)std::time(nullptr);
     c["model"] = g_model;
     c["choices"] = json::array({ch});
     return c;
@@ -219,10 +251,207 @@ static json completion(const std::string& content, const json& logprobs, int pto
     json r;
     r["id"] = "chatcmpl-sgiandubh";
     r["object"] = "chat.completion";
+    r["created"] = (long)std::time(nullptr);
     r["model"] = g_model;
     r["choices"] = json::array({choice});
     r["usage"] = {{"prompt_tokens", ptoks}, {"completion_tokens", 0}, {"total_tokens", ptoks}};
     return r;
+}
+
+// ---- shared answer core: a query → rendered string + structured components, used by every API and the REPL ----
+struct Answer {
+    std::string content;   // rendered markdown (default format)
+    std::string body;      // the answer text alone (no provenance)
+    std::string citation;  // section / rule id / source label ("" if none)
+    std::string passage;   // the supporting passage it's grounded in ("" if none / the answer IS the passage)
+    std::string kind;      // distilled | retrieved | generated | abstain
+    double confidence = -1; // exp(decided logprob) for a model decision, else -1
+    json lp;               // OpenAI logprobs object (null unless a model decision backed it)
+    int ptoks = 0;
+};
+
+static Answer answer(const std::string& user) {
+    static const std::string ABSTAIN = "That isn't covered in this material. Try rephrasing your question.";
+    auto qw = words(user);
+    double best = 0.0;
+    const Item* hit = nullptr;
+    for (const auto& it : g_items) {
+        double s = jaccard(qw, words(it.question));
+        if (s > best) { best = s; hit = &it; }
+    }
+    std::string body, item_cite;
+    bool is_answer = false, is_generated = false, is_retrieval = false;
+    json lp = nullptr;
+    Answer a;
+    a.ptoks = (int)qw.size();
+    a.kind = "abstain";
+    if (hit && best >= g_tau) {
+        item_cite = hit->citation;
+        Decision d = hit->facts.empty() ? Decision{} : run_engine(g_pkg + "/" + hit->facts);
+        lp = logprobs_of(d, *hit);
+        if (!hit->answer.empty()) body = hit->answer;                                  // distilled answer
+        else if (!hit->options.empty() && d.decide >= 0 && d.decide < (int)hit->options.size())
+            body = "The answer is " + hit->options[d.decide] + ".";                     // MC: engine decides live
+        else body = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)");
+        is_answer = true; a.kind = "distilled";
+    }
+    if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
+        const Passage* gp = retrieve_answer(qw);                                        // retrieval-as-answer (strict + margin)
+        if (gp) { body = gp->text; item_cite = gp->section; is_answer = true; is_retrieval = true; a.kind = "retrieved"; }
+    }
+    if (!is_answer && g_gram.loaded) {
+        auto toks = Gram::tokenize(user);
+        std::vector<std::string> cont = g_gram.in_domain(toks) ? g_gram.generate(toks, 24) : std::vector<std::string>{};
+        if (!cont.empty()) { body = detok(cont); is_answer = true; is_generated = true; a.kind = "generated"; }
+    }
+    if (!is_answer) { a.content = a.body = ABSTAIN; a.kind = "abstain"; return a; }
+
+    const Passage* gp = nullptr;
+    if (!is_retrieval && !g_knowledge.empty()) {                                        // ground faithful/gram answers
+        std::set<std::string> cue = qw;
+        auto aw = words(body);
+        cue.insert(aw.begin(), aw.end());
+        gp = ground(cue);
+    }
+    std::string prov;
+    if (gp)
+        prov = "\n\n\xF0\x9F\x93\x96 From the material" +
+               (gp->section.empty() ? std::string() : " (\xC2\xA7" + gp->section + ")") + ": \"" + gp->text + "\"";
+    else if (!item_cite.empty())
+        prov = "\n\n\xF0\x9F\x93\x96 " + std::string(is_retrieval ? "" : "Source: ") + item_cite;
+    bool cited = (gp != nullptr) || !item_cite.empty();
+    if (g_require_citation && !cited) { a.content = a.body = ABSTAIN; a.kind = "abstain"; return a; }
+
+    a.body = body;
+    a.citation = gp ? gp->section : item_cite;
+    a.passage = gp ? gp->text : std::string();
+    a.content = body + prov + (is_generated && !gp ? "\n\n(generated from the material)" : "");
+    a.lp = lp;
+    if (!lp.is_null() && lp.contains("content") && !lp["content"].empty())
+        a.confidence = std::exp(lp["content"][0].value("logprob", 0.0));
+    return a;
+}
+
+// Latest user-message text from an OpenAI- or Anthropic-shaped body (content may be a string or Anthropic text
+// blocks), or the legacy `prompt` field. System/history are ignored — this expert answers from the query alone.
+static std::string user_text(const json& body) {
+    if (body.contains("prompt") && body["prompt"].is_string()) return body["prompt"].get<std::string>();
+    std::string user;
+    if (body.contains("messages"))
+        for (const auto& m : body["messages"]) {
+            if (m.value("role", "") != "user") continue;
+            const auto& c = m["content"];
+            if (c.is_string()) user = c.get<std::string>();
+            else if (c.is_array()) { user.clear(); for (const auto& b : c) if (b.value("type", "") == "text") user += b.value("text", ""); }
+        }
+    return user;
+}
+
+// Did the caller ask for structured JSON? (OpenAI response_format, or a plain "format":"json".)
+static bool wants_json(const json& body) {
+    if (body.contains("response_format") && body["response_format"].is_object()) {
+        std::string t = body["response_format"].value("type", "");
+        if (t == "json_object" || t == "json_schema" || t == "json") return true;
+    }
+    return body.value("format", "") == "json";
+}
+
+// Structured form for an embedded app mentor: the answer's components, so the app renders its own UI.
+static std::string structured_json(const Answer& a) {
+    json j;
+    j["answer"] = a.body;
+    j["kind"] = a.kind;
+    if (!a.citation.empty()) j["citation"] = a.citation;
+    if (!a.passage.empty()) j["source"] = a.passage;
+    if (a.confidence >= 0) j["confidence"] = a.confidence;
+    return j.dump();
+}
+
+static std::string render(const Answer& a, bool json_fmt) { return json_fmt ? structured_json(a) : a.content; }
+
+static json openai_text_completion(const std::string& content, const json& lp, int ptoks) { // /v1/completions
+    json choice; choice["index"] = 0; choice["text"] = content; choice["finish_reason"] = "stop"; choice["logprobs"] = lp;
+    json r; r["id"] = "cmpl-sgiandubh"; r["object"] = "text_completion"; r["created"] = (long)std::time(nullptr); r["model"] = g_model;
+    r["choices"] = json::array({choice});
+    r["usage"] = {{"prompt_tokens", ptoks}, {"completion_tokens", 0}, {"total_tokens", ptoks}};
+    return r;
+}
+
+static json anthropic_message(const std::string& content, int ptoks) { // /v1/messages
+    json block; block["type"] = "text"; block["text"] = content;
+    json r; r["id"] = "msg_sgiandubh"; r["type"] = "message"; r["role"] = "assistant"; r["model"] = g_model;
+    r["content"] = json::array({block}); r["stop_reason"] = "end_turn"; r["stop_sequence"] = nullptr;
+    r["usage"] = {{"input_tokens", ptoks}, {"output_tokens", 0}};
+    return r;
+}
+
+// Route-aware SSE streaming. route: "chat" (OpenAI chat) | "text" (OpenAI completions) | "anthropic" (messages).
+static void stream_answer(httplib::Response& res, std::string route, std::string content, json lp, int ptoks) {
+    res.set_chunked_content_provider("text/event-stream",
+        [route, content, lp, ptoks](size_t, httplib::DataSink& sink) {
+            auto raw = [&](const std::string& s) { sink.write(s.data(), s.size()); };
+            if (route == "anthropic") {
+                json msg; msg["id"] = "msg_sgiandubh"; msg["type"] = "message"; msg["role"] = "assistant";
+                msg["model"] = g_model; msg["content"] = json::array(); msg["stop_reason"] = nullptr;
+                msg["usage"] = {{"input_tokens", ptoks}, {"output_tokens", 0}};
+                json ms; ms["type"] = "message_start"; ms["message"] = msg;
+                raw("event: message_start\ndata: " + ms.dump() + "\n\n");
+                json cbs; cbs["type"] = "content_block_start"; cbs["index"] = 0;
+                cbs["content_block"] = {{"type", "text"}, {"text", ""}};
+                raw("event: content_block_start\ndata: " + cbs.dump() + "\n\n");
+            } else if (route == "chat") {
+                raw("data: " + stream_chunk(json{{"role", "assistant"}}, nullptr, json(nullptr)).dump() + "\n\n");
+            }
+            size_t i = 0;
+            while (i < content.size()) {
+                size_t sp = content.find(' ', i);
+                std::string piece = (sp == std::string::npos) ? content.substr(i) : content.substr(i, sp - i + 1);
+                if (route == "anthropic") {
+                    json d; d["type"] = "content_block_delta"; d["index"] = 0;
+                    d["delta"] = {{"type", "text_delta"}, {"text", piece}};
+                    raw("event: content_block_delta\ndata: " + d.dump() + "\n\n");
+                } else if (route == "text") {
+                    json ch; ch["text"] = piece; ch["index"] = 0; ch["finish_reason"] = nullptr;
+                    json c; c["id"] = "cmpl-sgiandubh"; c["object"] = "text_completion"; c["created"] = (long)std::time(nullptr); c["model"] = g_model;
+                    c["choices"] = json::array({ch});
+                    raw("data: " + c.dump() + "\n\n");
+                } else {
+                    raw("data: " + stream_chunk(json{{"content", piece}}, nullptr, json(nullptr)).dump() + "\n\n");
+                }
+                i = (sp == std::string::npos) ? content.size() : sp + 1;
+            }
+            if (route == "anthropic") {
+                raw("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n");
+                json md; md["type"] = "message_delta"; md["delta"] = {{"stop_reason", "end_turn"}};
+                md["usage"] = {{"output_tokens", 0}};
+                raw("event: message_delta\ndata: " + md.dump() + "\n\n");
+                raw("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
+            } else if (route == "chat") {
+                raw("data: " + stream_chunk(json::object(), "stop", lp).dump() + "\n\n");
+                raw("data: [DONE]\n\n");
+            } else {
+                json ch; ch["text"] = ""; ch["index"] = 0; ch["finish_reason"] = "stop";
+                json c; c["id"] = "cmpl-sgiandubh"; c["object"] = "text_completion"; c["created"] = (long)std::time(nullptr); c["model"] = g_model;
+                c["choices"] = json::array({ch});
+                raw("data: " + c.dump() + "\n\n");
+                raw("data: [DONE]\n\n");
+            }
+            sink.done();
+            return true;
+        });
+}
+
+// One handler for all three POST routes (OpenAI chat/completions, Anthropic messages).
+static void handle(const httplib::Request& req, httplib::Response& res, const std::string& route) {
+    json body;
+    try { body = json::parse(req.body); }
+    catch (...) { res.status = 400; res.set_content("{\"error\":\"invalid json\"}", "application/json"); return; }
+    Answer a = answer(user_text(body));
+    std::string content = render(a, wants_json(body));
+    if (body.value("stream", false)) { stream_answer(res, route, content, a.lp, a.ptoks); return; }
+    if (route == "anthropic") res.set_content(anthropic_message(content, a.ptoks).dump(), "application/json");
+    else if (route == "text") res.set_content(openai_text_completion(content, a.lp, a.ptoks).dump(), "application/json");
+    else res.set_content(completion(content, a.lp, a.ptoks).dump(), "application/json");
 }
 
 int main(int argc, char** argv) {
@@ -231,6 +460,7 @@ int main(int argc, char** argv) {
         std::string a = argv[i];
         if (a == "--require-citation") g_require_citation = true;
         else if (a == "--answer-from-corpus") g_answer_from_corpus = true;
+        else if (a == "--repl") g_repl = true;
         else pos.push_back(a);
     }
     g_pkg = pos.size() > 0 ? pos[0] : "package";
@@ -263,6 +493,21 @@ int main(int argc, char** argv) {
             g_answer_from_corpus ? " · retrieval-answer" : "",
             g_require_citation ? " · require-citation" : "", port);
 
+    if (g_repl) {  // local testing: read queries from stdin, print answers (no server)
+        fprintf(stderr, "sgiandubh REPL — type a query; blank line or Ctrl-D to exit.\n");
+        std::string line;
+        while (true) {
+            fprintf(stderr, "\n> "); fflush(stderr);
+            if (!std::getline(std::cin, line) || line.empty()) break;
+            Answer a = answer(line);
+            printf("%s\n", a.content.c_str());
+            if (a.confidence >= 0) printf("  [kind=%s · confidence p≈%.2f]\n", a.kind.c_str(), a.confidence);
+            else printf("  [kind=%s]\n", a.kind.c_str());
+            fflush(stdout);
+        }
+        return 0;
+    }
+
     httplib::Server svr;
 
     svr.Get("/v1/models", [](const httplib::Request&, httplib::Response& res) {
@@ -271,103 +516,9 @@ int main(int argc, char** argv) {
         res.set_content(m.dump(), "application/json");
     });
 
-    svr.Post("/v1/chat/completions", [](const httplib::Request& req, httplib::Response& res) {
-        json body;
-        try { body = json::parse(req.body); }
-        catch (...) { res.status = 400; res.set_content("{\"error\":\"invalid json\"}", "application/json"); return; }
-        std::string user;
-        if (body.contains("messages"))
-            for (const auto& m : body["messages"]) if (m.value("role", "") == "user") user = m.value("content", "");
-
-        auto qw = words(user);
-        double best = 0.0;
-        const Item* hit = nullptr;
-        for (const auto& it : g_items) {
-            double s = jaccard(qw, words(it.question));
-            if (s > best) { best = s; hit = &it; }
-        }
-
-        static const std::string ABSTAIN = "That isn't covered in this material. Try rephrasing your question.";
-        std::string answer_body, item_cite;
-        bool is_answer = false, is_generated = false, is_retrieval = false;
-        json lp = nullptr;
-        if (hit && best >= g_tau) {
-            item_cite = hit->citation;
-            Decision d = hit->facts.empty() ? Decision{} : run_engine(g_pkg + "/" + hit->facts);
-            lp = logprobs_of(d, *hit);
-            if (!hit->answer.empty())
-                answer_body = hit->answer;                                          // generated answer (faithful)
-            else if (!hit->options.empty() && d.decide >= 0 && d.decide < (int)hit->options.size())
-                answer_body = "The answer is " + hit->options[d.decide] + ".";       // MC: engine decides live
-            else
-                answer_body = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)");
-            is_answer = true;
-        }
-        if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
-            // retrieval-as-answer: return the best-matching passage verbatim, cited (safest for specs/manuals — no
-            // generation, the answer IS the owner's text).
-            const Passage* gp = ground(qw);
-            if (gp) { answer_body = gp->text; item_cite = gp->section; is_answer = true; is_retrieval = true; }
-        }
-        if (!is_answer && g_gram.loaded) {
-            // no distilled/retrieved answer → generative fallback, bounded to the corpus (gram kernel)
-            auto toks = Gram::tokenize(user);
-            std::vector<std::string> cont = g_gram.in_domain(toks) ? g_gram.generate(toks, 24) : std::vector<std::string>{};
-            if (!cont.empty()) { answer_body = detok(cont); is_answer = true; is_generated = true; }
-        }
-
-        std::string content;
-        if (is_answer) {
-            // For faithful/gram answers, attach the best supporting passage (grounding). A retrieval answer already
-            // IS a passage — just cite it (its section/rule id), don't re-attach.
-            const Passage* gp = nullptr;
-            if (!is_retrieval && !g_knowledge.empty()) {
-                std::set<std::string> cue = qw;
-                auto aw = words(answer_body);
-                cue.insert(aw.begin(), aw.end());
-                gp = ground(cue);
-            }
-            std::string prov;
-            if (gp)
-                prov = "\n\n\xF0\x9F\x93\x96 From the material" +
-                       (gp->section.empty() ? std::string() : " (\xC2\xA7" + gp->section + ")") +
-                       ": \"" + gp->text + "\"";
-            else if (!item_cite.empty())
-                prov = "\n\n\xF0\x9F\x93\x96 " + std::string(is_retrieval ? "" : "Source: ") + item_cite;
-            bool cited = (gp != nullptr) || !item_cite.empty();
-            if (g_require_citation && !cited) {
-                content = ABSTAIN;                                                   // no provenance → refuse
-                lp = nullptr;
-            } else {
-                content = answer_body + prov + (is_generated && !gp ? "\n\n(generated from the material)" : "");
-            }
-        } else {
-            content = ABSTAIN;                                                       // the bound
-        }
-        if (!body.value("stream", false)) {
-            res.set_content(completion(content, lp, (int)qw.size()).dump(), "application/json");
-            return;
-        }
-        // OpenAI SSE streaming: role chunk → content word-pieces → final (finish + logprobs) → [DONE]
-        res.set_chunked_content_provider(
-            "text/event-stream",
-            [content, lp](size_t, httplib::DataSink& sink) {
-                auto sse = [&](const json& j) { std::string s = "data: " + j.dump() + "\n\n"; sink.write(s.data(), s.size()); };
-                sse(stream_chunk(json{{"role", "assistant"}}, nullptr, json(nullptr)));
-                size_t i = 0;
-                while (i < content.size()) {
-                    size_t sp = content.find(' ', i);
-                    std::string piece = (sp == std::string::npos) ? content.substr(i) : content.substr(i, sp - i + 1);
-                    sse(stream_chunk(json{{"content", piece}}, nullptr, json(nullptr)));
-                    i = (sp == std::string::npos) ? content.size() : sp + 1;
-                }
-                sse(stream_chunk(json::object(), "stop", lp));
-                std::string done = "data: [DONE]\n\n";
-                sink.write(done.data(), done.size());
-                sink.done();
-                return true;
-            });
-    });
+    svr.Post("/v1/chat/completions", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "chat"); });
+    svr.Post("/v1/completions", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "text"); });       // OpenAI legacy
+    svr.Post("/v1/messages", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "anthropic"); });     // Anthropic
 
     // httplib defaults to 5 requests/connection — far too low for OpenAI clients that pool connections (the cap
     // forces a reconnect every 5 calls). Raise it so a pooled connection serves many requests; TCP_NODELAY drops

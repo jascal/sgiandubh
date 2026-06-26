@@ -74,6 +74,14 @@ Point any OpenAI client at it. In-scope → grounded/cited answer; out-of-scope 
 `--require-citation` refuses any answer it can't ground in a passage or attach a citation to — the strong mode for
 regulated/high-stakes domains: every served answer carries provenance, or it abstains.
 
+**APIs** (verified against the official `openai` and `anthropic` SDKs):
+- OpenAI: `POST /v1/chat/completions`, `POST /v1/completions`, `GET /v1/models` — non-streaming + SSE `stream:true`,
+  with `logprobs` and the standard `created`/`usage` fields.
+- Anthropic: `POST /v1/messages` — content-block response + Anthropic SSE events; accepts string or block content.
+- **Structured output** for an embedded app: `response_format:{type:"json_object"}` → `content` is a JSON string of
+  the answer's components `{answer, kind, citation, source, confidence}`, so the app renders its own UI.
+- `--repl` — interactive stdin loop for local testing (no server): prints the answer + kind + confidence.
+
 ## The package contract (`package/`)
 `index.json`:
 ```json
