@@ -17,7 +17,9 @@
 #include <fstream>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 using json = nlohmann::json;
@@ -39,9 +41,12 @@ static std::mutex g_engine_mu; // the embedded engine is a single stateful insta
 static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
 
 // Grounding: the owner's corpus passages, so every answer can carry the verbatim source it's supported by.
-struct Passage { std::string section, text; std::set<std::string> w; };
+struct Passage { std::string section, text; std::set<std::string> w; std::vector<float> vec; };
 static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (optional)
-static double g_ground_tau = 0.10;        // min lexical overlap to ground an answer in a passage
+static std::unordered_map<std::string, std::vector<float>> g_wordvec; // corpus word embeddings (package/wordvec.txt)
+static int g_dim = 0;                      // embedding dim (>0 once wordvec.txt is loaded → cosine grounding)
+static double g_ground_tau = 0.10;        // min lexical overlap to ground (lexical fallback)
+static double g_cos_tau = 0.35;           // min cosine to ground (vector path)
 static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
 
 static bool stop(const std::string& w) {
@@ -69,6 +74,41 @@ static double jaccard(const std::set<std::string>& a, const std::set<std::string
     return (double)inter / (double)(a.size() + b.size() - inter);
 }
 
+// Corpus word embeddings (package/wordvec.txt: `word v0 .. vD`). Optional — enables cosine grounding.
+static void load_wordvec(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        std::istringstream ss(line);
+        std::string w;
+        if (!(ss >> w)) continue;
+        std::vector<float> v;
+        float x;
+        while (ss >> x) v.push_back(x);
+        if (v.empty()) continue;
+        if (g_dim == 0) g_dim = (int)v.size();
+        if ((int)v.size() == g_dim) g_wordvec.emplace(std::move(w), std::move(v));
+    }
+}
+// Mean of the in-vocabulary words' vectors, L2-normalized (empty if no word is known).
+static std::vector<float> embed(const std::set<std::string>& ws) {
+    if (g_dim <= 0) return {};
+    std::vector<float> v(g_dim, 0.0f);
+    int n = 0;
+    for (const auto& w : ws) {
+        auto it = g_wordvec.find(w);
+        if (it == g_wordvec.end()) continue;
+        for (int i = 0; i < g_dim; i++) v[i] += it->second[i];
+        n++;
+    }
+    if (n == 0) return {};
+    double nrm = 0;
+    for (float x : v) nrm += (double)x * x;
+    nrm = std::sqrt(nrm);
+    if (nrm > 0) for (float& x : v) x = (float)(x / nrm);
+    return v;
+}
 // Grounding passages (package/knowledge.tsv: `section <TAB> passage`). The owner's content, verbatim.
 static void load_knowledge(const std::string& path) {
     std::ifstream f(path);
@@ -81,11 +121,27 @@ static void load_knowledge(const std::string& path) {
         p.section = line.substr(0, tab);
         p.text = line.substr(tab + 1);
         p.w = words(p.text);
-        if (!p.w.empty()) g_knowledge.push_back(std::move(p));
+        if (p.w.empty()) continue;
+        p.vec = embed(p.w);  // precompute the passage embedding (empty if no vectors loaded)
+        g_knowledge.push_back(std::move(p));
     }
 }
-// Best supporting passage for a cue (query + answer words), or nullptr if nothing clears g_ground_tau.
+// Best supporting passage for a cue (query + answer words): cosine over embeddings if loaded, else lexical Jaccard.
 static const Passage* ground(const std::set<std::string>& cue) {
+    if (g_dim > 0) {
+        std::vector<float> qv = embed(cue);
+        if (!qv.empty()) {
+            const Passage* best = nullptr;
+            double bs = g_cos_tau;
+            for (const auto& p : g_knowledge) {
+                if ((int)p.vec.size() != g_dim) continue;
+                double s = 0;
+                for (int i = 0; i < g_dim; i++) s += (double)qv[i] * p.vec[i];
+                if (s > bs) { bs = s; best = &p; }
+            }
+            return best;
+        }
+    }
     const Passage* best = nullptr;
     double bs = g_ground_tau;
     for (const auto& p : g_knowledge) {
@@ -196,10 +252,13 @@ int main(int argc, char** argv) {
         g_items.push_back(x);
     }
     g_gram.load(g_pkg + "/gram"); // optional generative fallback
-    load_knowledge(g_pkg + "/knowledge.tsv"); // optional grounding passages
-    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · grounding=%s%s · listening :%d\n",
-            g_items.size(), g_model.c_str(), g_gram.loaded ? "on" : "off",
-            g_knowledge.empty() ? "off" : "on", g_require_citation ? " · require-citation" : "", port);
+    load_wordvec(g_pkg + "/wordvec.txt");      // optional corpus embeddings (enables cosine grounding)
+    load_knowledge(g_pkg + "/knowledge.tsv");  // optional grounding passages (vectors computed here)
+    const char* gmode = g_knowledge.empty() ? "off" : (g_dim > 0 ? "vector" : "lexical");
+    fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · grounding=%s%s%s · listening :%d\n",
+            g_items.size(), g_model.c_str(), g_gram.loaded ? "on" : "off", gmode,
+            g_dim > 0 ? ("/" + std::to_string(g_dim) + "d").c_str() : "",
+            g_require_citation ? " · require-citation" : "", port);
 
     httplib::Server svr;
 

@@ -40,11 +40,15 @@ abstain. Built from the corpus text alone (no model). Routing at serve time: **f
 
 ## Stage 2.6 — grounding (optional, the publishing win)
 ```bash
-python tools/build_grounding.py --corpus knowledge.txt --out package   # → package/knowledge.tsv
+python tools/build_grounding.py --corpus knowledge.txt --out package           # knowledge.tsv + wordvec.txt
+python tools/build_grounding.py --corpus knowledge.txt --out package --dim 0    # lexical only (no numpy/scipy)
 ```
 Attaches the best-matching passage from the owner's **own content** (verbatim + section) to EVERY answer — faithful
 and generative alike — so each answer is grounded in their material, not just labeled. Built from the corpus text
-alone (no model). Lexical retrieval now; embeddings later.
+alone (no model): `wordvec.txt` holds corpus-derived word embeddings (PPMI + SVD over the corpus), so the server
+grounds by **meaning** (cosine) and falls back to lexical word-overlap when no vectors are shipped. The embeddings
+are *data*, not a model — the runtime stays model-free. Vectors need numpy+scipy at build time (`--dim 0` skips
+them); quality scales with corpus size, and pretrained vectors (same file format) are a drop-in upgrade.
 
 ## Stage 3 — build (sgiandubh)
 ```bash
@@ -71,12 +75,14 @@ regulated/high-stakes domains: every served answer carries provenance, or it abs
 `<facts dir>/candidate.facts` (one candidate id per line) and `<facts dir>/contrib.facts`
 (`block <TAB> id <TAB> weight`) — the decision the compiled Soufflé engine re-derives as the certificate.
 `knowledge.tsv` (optional): `section <TAB> passage` — the owner's content, for grounding.
+`wordvec.txt` (optional): `word v0 .. vD` — corpus word embeddings; enables cosine (semantic) grounding.
 `gram/` (optional): the n-gram KB for the generative tail.
 
 ## Properties (all inherent, not bolted on)
 - **Bounded** — answers its material, abstains elsewhere; off-domain is structurally unanswerable, not filtered.
-- **Grounded** — every answer carries the verbatim passage from the owner's content it's supported by (+ section);
-  `--require-citation` refuses anything it can't ground or cite.
+- **Grounded** — every answer carries the verbatim passage from the owner's content it's supported by (+ section),
+  matched semantically (corpus-derived embeddings, cosine) or lexically; `--require-citation` refuses anything it
+  can't ground or cite.
 - **Auditable** — the answer is (or is certified by) a Datalog decision; `Σ block == logit`.
 - **Small & fast** — a few-MB native binary, microsecond decisions, no model/GPU at runtime.
 
