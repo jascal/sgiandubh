@@ -101,6 +101,21 @@ static json logprobs_of(const Decision& d, const Item& it) {
     return lp;
 }
 
+// One OpenAI streaming chunk (object "chat.completion.chunk").
+static json stream_chunk(const json& delta, const char* finish, const json& lp) {
+    json ch;
+    ch["index"] = 0;
+    ch["delta"] = delta;
+    ch["finish_reason"] = finish ? json(finish) : json(nullptr);
+    if (!lp.is_null()) ch["logprobs"] = lp;
+    json c;
+    c["id"] = "chatcmpl-sgiandubh";
+    c["object"] = "chat.completion.chunk";
+    c["model"] = g_model;
+    c["choices"] = json::array({ch});
+    return c;
+}
+
 static json completion(const std::string& content, const json& logprobs, int ptoks) {
     json choice;
     choice["index"] = 0;
@@ -187,7 +202,29 @@ int main(int argc, char** argv) {
         } else {
             content = "That isn't covered in this material. Try rephrasing, or ask your teacher."; // the bound
         }
-        res.set_content(completion(content, lp, (int)qw.size()).dump(), "application/json");
+        if (!body.value("stream", false)) {
+            res.set_content(completion(content, lp, (int)qw.size()).dump(), "application/json");
+            return;
+        }
+        // OpenAI SSE streaming: role chunk → content word-pieces → final (finish + logprobs) → [DONE]
+        res.set_chunked_content_provider(
+            "text/event-stream",
+            [content, lp](size_t, httplib::DataSink& sink) {
+                auto sse = [&](const json& j) { std::string s = "data: " + j.dump() + "\n\n"; sink.write(s.data(), s.size()); };
+                sse(stream_chunk(json{{"role", "assistant"}}, nullptr, json(nullptr)));
+                size_t i = 0;
+                while (i < content.size()) {
+                    size_t sp = content.find(' ', i);
+                    std::string piece = (sp == std::string::npos) ? content.substr(i) : content.substr(i, sp - i + 1);
+                    sse(stream_chunk(json{{"content", piece}}, nullptr, json(nullptr)));
+                    i = (sp == std::string::npos) ? content.size() : sp + 1;
+                }
+                sse(stream_chunk(json::object(), "stop", lp));
+                std::string done = "data: [DONE]\n\n";
+                sink.write(done.data(), done.size());
+                sink.done();
+                return true;
+            });
     });
 
     svr.listen("0.0.0.0", port);

@@ -54,10 +54,12 @@ model it came from.
 3. **abstain** — out of domain (vocab-overlap gate fails) → refuses, by construction.
 
 ## Status
-Working: embedded in-process engine (one ~1.2 MB binary, no spawn; 1-ULP faithful); cite + abstain; **`logprobs`**
-(confidence + distractor mass); the **gram kernel** generative fallback (`tools/build_gram.py`); generic
-`tools/dl2package.py` (.dl → package). See [WORKFLOW.md](./WORKFLOW.md). Next: a **vocab-pruned tokenizer** (smaller),
-**streaming**, and consuming fieldrun's real emitted package.
+Working: embedded in-process engine (one ~1.3 MB binary, no spawn; 1-ULP faithful); cite + abstain; **`logprobs`**
+(confidence + distractor mass); **SSE streaming**; the **gram kernel** generative fallback (`tools/build_gram.py`);
+generic `tools/dl2package.py` (.dl → package). The full OpenAI surface — `/v1/models`, `/v1/chat/completions`
+(streaming + non-streaming), logprobs — is in place, and the runtime is tokenizer-free (it works at the text level).
+See [WORKFLOW.md](./WORKFLOW.md). Next: consuming fieldrun's real emitted package (the end-to-end showcase) and the
+push-button workflow (fieldrun token-text labels + `dl2package` corpus mode, to drop the hand-written manifest).
 
 ## Licence note
 Code: see `LICENSE`. The `package/` demo facts are hand-built from OpenStax Anatomy & Physiology 2e (CC BY-NC-SA) — a
