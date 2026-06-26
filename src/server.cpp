@@ -515,6 +515,22 @@ int main(int argc, char** argv) {
         json m; m["object"] = "list"; m["data"] = json::array({e});
         res.set_content(m.dump(), "application/json");
     });
+    // readiness/liveness — the expert's own state (it's a leaf; no spokes). Mirrors claymore's /health.
+    auto health = [](const httplib::Request&, httplib::Response& res) {
+        json m;
+        m["object"] = "health";
+        m["status"] = g_prog ? "ok" : "down";
+        m["model"] = g_model;
+        m["engine"] = g_prog != nullptr;
+        m["items"] = (int)g_items.size();
+        m["gram"] = g_gram.loaded;
+        m["grounding"] = g_knowledge.empty() ? "off" : (g_dim > 0 ? "vector" : "lexical");
+        m["knowledge_passages"] = (int)g_knowledge.size();
+        res.status = g_prog ? 200 : 503;
+        res.set_content(m.dump(), "application/json");
+    };
+    svr.Get("/health", health);
+    svr.Get("/healthz", health);
 
     svr.Post("/v1/chat/completions", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "chat"); });
     svr.Post("/v1/completions", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "text"); });       // OpenAI legacy

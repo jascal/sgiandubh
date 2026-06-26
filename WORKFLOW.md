@@ -81,6 +81,8 @@ regulated/high-stakes domains: every served answer carries provenance, or it abs
 - **Structured output** for an embedded app: `response_format:{type:"json_object"}` → `content` is a JSON string of
   the answer's components `{answer, kind, citation, source, confidence}`, so the app renders its own UI.
 - `--repl` — interactive stdin loop for local testing (no server): prints the answer + kind + confidence.
+- `GET /health` (alias `/healthz`) — readiness/liveness: `{model, engine, items, gram, grounding, knowledge_passages,
+  status}` (200 ok / 503 if the embedded engine failed to load). Matches claymore's `/health` so a hub can probe it.
 
 ## The package contract (`package/`)
 `index.json`:
