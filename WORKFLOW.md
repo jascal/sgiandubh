@@ -21,11 +21,14 @@ Produces one `.dl` per decision: `candidate(id)`, `contrib("block", id, w)`, and
 With `--steps N` each prompt yields a short *generated* answer (a numbered trace); the model is used **only here**.
 
 ## Stage 2 — package (sgiandubh `tools/dl2package.py`)
-Map each query to its decision `.dl` in a manifest, then assemble:
+The seam — turns fieldrun's raw decisions into the package the server consumes. Generic; no domain logic. Two modes:
 ```bash
+# push-button: one item per prompt, query = the corpus line, decisions = that prompt's p{NNNNN}_*.dl
+python tools/dl2package.py --corpus domain.txt --dl export/ [--cite qmap.json] --out package
+# or explicit (ad-hoc / mixed sources): a manifest mapping each query to its .dl
 python tools/dl2package.py --manifest manifest.json --out package
 ```
-This is the seam — it turns fieldrun's raw decisions into the package the server consumes. Generic; no domain logic.
+Corpus mode needs no hand-written manifest — give it the same corpus you extracted and the `--out` `.dl` directory.
 
 ## Stage 2.5 — gram kernel (optional, generative tail)
 ```bash
