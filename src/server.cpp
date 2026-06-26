@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -32,6 +33,7 @@ static std::vector<Item> g_items;
 static std::string g_pkg, g_model;
 static double g_tau = 0.12; // abstain threshold (lexical Jaccard) — the bound: below this → abstain
 static souffle::SouffleProgram* g_prog = nullptr;
+static std::mutex g_engine_mu; // the embedded engine is a single stateful instance (purge/loadAll/run) — serialize it
 static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
 
 static bool stop(const std::string& w) {
@@ -63,6 +65,7 @@ static double jaccard(const std::set<std::string>& a, const std::set<std::string
 static Decision run_engine(const std::string& facts_dir) {
     Decision r;
     if (!g_prog) return r;
+    std::lock_guard<std::mutex> lk(g_engine_mu); // shared stateful engine → one decode at a time (microseconds)
     g_prog->purgeInputRelations();
     g_prog->purgeInternalRelations();
     g_prog->purgeOutputRelations();
