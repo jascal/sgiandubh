@@ -1,0 +1,18 @@
+{
+  "_comment": "Maps each query to its fieldrun-emitted decision .dl (one program for a single-token decision, or a numbered trace for a generated answer). Feed to tools/dl2package.py to build a package. Nothing domain-specific — the corpus is the config.",
+  "model": "my-domain-expert",
+  "items": [
+    {
+      "id": "item1",
+      "query": "the student-facing question or context to match against",
+      "citation": "Source §X",
+      "dl": "export/p00001_*.dl"
+    },
+    {
+      "id": "item2",
+      "query": "another in-domain question",
+      "citation": "Source §Y",
+      "dl": "export/p00002_*.dl"
+    }
+  ]
+}

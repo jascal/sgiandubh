@@ -2,3 +2,4 @@
 *.o
 *.cpp.bak
 souffle-compile-*
+/package_de/

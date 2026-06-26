@@ -21,7 +21,7 @@
 using json = nlohmann::json;
 
 struct Item {
-    std::string id, question, citation, facts;
+    std::string id, question, citation, facts, answer;
     std::vector<std::string> options;
 };
 static std::vector<Item> g_items;
@@ -96,9 +96,10 @@ int main(int argc, char** argv) {
     for (const auto& it : idx["items"]) {
         Item x;
         x.id = it.value("id", "");
-        x.question = it.value("question", "");
+        x.question = it.contains("query") ? it.value("query", "") : it.value("question", "");
         x.citation = it.value("citation", "");
         x.facts = it.value("facts", "");
+        x.answer = it.value("answer", "");
         if (it.contains("options")) for (const auto& o : it["options"]) x.options.push_back(o.get<std::string>());
         g_items.push_back(x);
     }
@@ -131,11 +132,20 @@ int main(int argc, char** argv) {
 
         std::string content;
         if (hit && best >= g_tau) {
-            int d = run_engine(g_pkg + "/" + hit->facts);
-            if (d >= 0 && d < (int)hit->options.size())
-                content = "The answer is " + hit->options[d] + ".\n\n\xF0\x9F\x93\x96 Source: " + hit->citation;
-            else
-                content = "(engine error)";
+            const std::string cite = hit->citation.empty() ? "" : ("\n\n\xF0\x9F\x93\x96 Source: " + hit->citation);
+            if (!hit->answer.empty()) {
+                // generated answer distilled offline (faithful); the shipped facts are its engine certificate
+                content = hit->answer + cite;
+            } else if (!hit->options.empty()) {
+                // multiple-choice: the compiled engine decides live among the options
+                int d = run_engine(g_pkg + "/" + hit->facts);
+                content = (d >= 0 && d < (int)hit->options.size())
+                              ? ("The answer is " + hit->options[d] + "." + cite)
+                              : "(engine error)";
+            } else {
+                int d = run_engine(g_pkg + "/" + hit->facts);
+                content = "decide=" + std::to_string(d) + cite;
+            }
         } else {
             // the bound: nothing in scope → abstain rather than confabulate
             content = "That isn't covered in this material. Try rephrasing, or ask your teacher.";
