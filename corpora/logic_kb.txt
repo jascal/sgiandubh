@@ -1,0 +1,1200 @@
+THE OPEN LOGIC TEXT Complete Build Open Logic Project Revision: 9f12419 (master) 2026-05-25 The Open Logic Text by the Open Logic Project is licensed under a Creative Commons Attribution 4.0 International License.
+Coverage of some topics currently included may not yet be complete, and many sections still require substantial revision.
+4.9 Sets of Different Sizes, and Cantor’s Theorem .
+102 II 7 Propositional Logic 104 Syntax and Semantics 106 7.1 Introduction .
+114 Release : 9f12419 (2026-05-25) 3 CONTENTS 8 Derivation Systems 116 8.1 Introduction .
+121 9 The Sequent Calculus 123 9.1 Rules and Derivations .
+133 9.8 Derivability and the Propositional Connectives .
+139 10 Natural Deduction 141 10.1 Rules and Derivations .
+150 10.7 Derivability and the Propositional Connectives .
+167 11.7 Derivability and the Propositional Connectives .
+174 12 Axiomatic Derivations 176 12.1 Rules and Derivations .
+176 12.2 Axioms and Rules for the Propositional Connectives .
+178 4 Release : 9f12419 (2026-05-25) CONTENTS 12.3 Examples of Derivations .
+183 12.7 Derivability and the Propositional Connectives .
+186 13 The Completeness Theorem 187 13.1 Introduction .
+188 13.3 Complete Consistent Sets of Sentences .
+192 13.8 A Direct Proof of the Compactness Theorem .
+205 15 Syntax of First-Order Logic 207 15.1 Introduction .
+223 Release : 9f12419 (2026-05-25) 5 CONTENTS 16 Semantics of First-Order Logic 224 16.1 Introduction .
+226 16.4 Satisfaction of a Formula in a Structure .
+249 18 Derivation Systems 251 18.1 Introduction .
+256 19 The Sequent Calculus 258 19.1 Rules and Derivations .
+270 19.10 Derivability and the Propositional Connectives .
+271 19.11 Derivability and the Quantifiers .
+273 19.13 Derivations with Identity predicate .
+278 19.14 Soundness with Identity predicate .
+279 20 Natural Deduction 6 282 Release : 9f12419 (2026-05-25) CONTENTS 20.1 Rules and Derivations .
+296 20.9 Derivability and the Propositional Connectives .
+297 20.10 Derivability and the Quantifiers .
+299 20.12 Derivations with Identity predicate .
+303 20.13 Soundness with Identity predicate .
+322 21.9 Derivability and the Propositional Connectives .
+323 21.10 Derivability and the Quantifiers .
+330 21.13 Soundness with Identity predicate .
+331 22 Axiomatic Derivations 334 22.1 Rules and Derivations .
+334 22.2 Axioms and Rules for the Propositional Connectives .
+336 22.3 Axioms and Rules for Quantifiers .
+340 22.8 The Deduction Theorem with Quantifiers .
+343 22.10 Derivability and the Propositional Connectives .
+344 22.11 Derivability and the Quantifiers .
+345 Release : 9f12419 (2026-05-25) 7 CONTENTS 22.13 Derivations with Identity predicate .
+347 23 The Completeness Theorem 348 23.1 Introduction .
+349 23.3 Complete Consistent Sets of Sentences .
+360 23.10 A Direct Proof of the Compactness Theorem .
+362 23.11 The Löwenheim–Skolem Theorem .
+403 27 The Interpolation Theorem 405 27.1 Introduction .
+405 27.3 Craig’s Interpolation Theorem .
+409 28 Lindström’s Theorem 412 28.1 Introduction .
+449 Release : 9f12419 (2026-05-25) 9 CONTENTS 30.4 The s-m-n Theorem .
+461 30.17 Complete Computably Enumerable Sets .
+467 30.22 Applying the Fixed-Point Theorem .
+531 34 Arithmetization of Syntax 532 34.1 Introduction .
+538 34.7 Derivations in Natural Deduction .
+576 Axiomatizable Complete Theories are Decidable .
+576 Q has no Complete, Consistent, Axiomatizable Extensions .
+576 Sentences Provable and Refutable in Q are Computably Inseparable .
+581 37.3 The First Incompleteness Theorem .
+587 37.6 The Derivability Conditions for PA .
+587 37.7 The Second Incompleteness Theorem .
+594 VIII Second-order Logic 596 38 Syntax and Semantics 598 38.1 Introduction .
+608 39.3 Second-order Logic is not Axiomatizable .
+610 39.5 The Löwenheim–Skolem Theorem Fails for Second-order Logic 611 Problems .
+619 41.2 The Syntax of the Lambda Calculus .
+667 X Many-valued Logic 669 45 Syntax and Semantics 671 45.1 Introduction .
+694 14 Release : 9f12419 (2026-05-25) CONTENTS XI Normal Modal Logics 699 49 Syntax and Semantics 701 49.1 Introduction .
+726 51 Axiomatic Derivations 727 51.1 Introduction .
+728 51.3 Derivations and Modal Systems .
+739 51.11 Derivability from a Set of Formulas .
+742 52 Completeness and Canonical Models 743 52.1 Introduction .
+745 52.4 Modalities and Complete Consistent Sets .
+749 52.7 Determination and Completeness for K .
+774 54.6 Soundness for Additional Rules .
+790 16 Release : 9f12419 (2026-05-25) CONTENTS 56.2 56.3 56.4 56.5 Semantics for Temporal Logic .
+803 57.8 Semantics of Public Announcement Logic .
+807 58.2 Syntax of Intuitionistic Logic .
+816 59 Semantics 817 59.1 Introduction .
+821 60 Soundness and Completeness 822 60.1 Soundness of Axiomatic Derivations .
+822 60.2 Soundness of Natural Deduction .
+833 61.4 Soundness for Intuitionistic Tableaux .
+843 63 Minimal Change Semantics 845 63.1 Introduction .
+846 63.3 Truth and Falsity of Counterfactuals .
+884 67.2 The Transfinite Recursion Theorem(s) .
+898 68.8 Appendix: Finite axiomatizability .
+942 XVI Methods 943 73 Proofs 945 73.1 Introduction .
+For instance, by default, the text will make all logical operators primitives and carry out all cases for all operators in proofs.
+To make your own, you might start from the sample driver file or look at the sources of the derived textbooks for more fancy and advanced examples.
+In other words, extensionality entails that sets are equal iff they are subsets of one another.
+If they all did, then we would run into outright contradictions.
+If R = { x : x ∈ / x } exists, then R ∈ R iff R ∈ / R, which is a contradiction.
+Let’s run through this proof more slowly.
+But R can’t both be and not be an element of R, so we have a contradiction.
+SETS Since the assumption that R ∈ R leads to a contradiction, we have R ∈ / R.
+Well, we would need to lay down axioms which give us very precise conditions for stating when sets exist (and when they don’t).
+For instance, each of these sets has a completely standard order relation on it.
+In fact, it is possible to develop set theory in a rigorous way as an axiomatic theory, and that theory will indeed deny the existence of this set.
+Finite trees occur in elementary parts of logic: for example, formulas can be understood in terms of their decomposition into a syntax tree, while derivations in many derivation systems also take the form of finite trees.
+Infinite trees appear already in the proof of the completeness theorems for propositional and first-order logic, and are used throughout mathematical logic.
+Different ways of doing this are by giving a formula, describing a method for computing the value, or listing the values for each argument.
+In some cases, this will require a proof that the cases are exhaustive and exclusive.
+At least, it will not always work, with complete generality.
+By combining the ideas in the previous proof, we now get that every bijection has an inverse, i.e., there is a single function which is both a left and right inverse of f .
+That this is always possible is actually not obvious—the possibility of making these choices is simply assumed as an axiom.
+In other words, this proposition assumes the so-called Axiom of Choice, an issue we will revisit in chapter 72.
+However, in many specific cases, e.g., when A = N or is finite, or when f is bijective, the Axiom of Choice is not required.
+This is also true for enumerations, but a bit harder to formulate and prove rigorously.
+By the same argument as in the proof of Proposition 4.8, that in turn is the case iff there is a bijection g : N → A where either N = N or N = {0, .
+Our completed enumeration thus starts like this: 1 2 3 4 5 6 7 8 9 10 ...
+This gives us the general formula: 2n · (2m + 1).
+Suppose, by way of contradiction, that Bω is enumerable, i.e., suppose that there is a list s1 , s2 , s3 , s4 , .
+If you like formulas better than definitions by cases, you could also define s ( n ) = 1 − s n ( n ).
+This shows in particular that there can be no list of all elements of Bω , since for any such list we could also construct a sequence s guaranteed to not be on the list, so the assumption that there is a list of all sequences in Bω leads to a contradiction.
+This proof method is called “diagonalization” because it uses the diagonal of the array to define s.
+The preceding proof did not mention a diagonal, but you can think of it as involving a diagonal if you picture it this way: Imagine the sets Z1 , Z2 , .
+We already had a proof that Bω , the set of all infinite sequences of 0s and 1s, is non-enumerable.
+The following proof uses Definition 4.4 if section 4.2 is included and Definition 4.27 otherwise.
+4.9 Sets of Different Sizes, and Cantor’s Theorem We have offered a precise statement of the idea that two sets have the same size.
+SETS OF DIFFERENT SIZES, AND CANTOR’S THEOREM It is clear that this relation is irreflexive and transitive.
+This allows us to restate Theorem 4.32 as the observation that N ≺ ℘(N).
+In fact, Cantor (1892) proved that this last point is perfectly general: Theorem 4.24 (Cantor).
+We present the slow proof if section 4.6 is present, otherwise a faster proof matching section 4.12.
+It’s instructive to compare the proof of Theorem 4.24 to that of Theorem 4.18.
+The proof is also worth comparing with the proof of Russell’s Paradox, Theorem 1.29.
+Indeed, Cantor’s Theorem was the inspiration for Russell’s own paradox.
+This is justified by the SchröderBernstein Theorem.
+The Schröder-Bernstein Theorem allows us to break the comparison down into cases so we only have to think of an injection from the first to the second, and vice-versa.
+(The ‘B’ stands for binary, and we can just think of it as the two-element set {0, 1}.) Theorem 4.31.
+The preceding proof did not mention a diagonal.
+Recall from your introductory logic course that each possible truth table expresses a truth function.
+In other words, the truth functions are all functions from Bk → B for some k.
+Prove that the set of all truth functions is enumerable.
+Use the fact that g is injective to derive a contradiction.
+2 is not rational, i.e., 2 ∈ /Q √ √ Proof.
+From here, we can complete the proof in two ways: First, geometrically (following Tennenbaum).2 Consider these squares: n m 2 This proof is reported by Conway (2006).
+In passing, this diagrammatic proof allows us to revisit the material from section 76.4.
+Tennenbaum (1927–2006) was a thoroughly modern mathematician; but the proof is undeniably lovely, completely rigorous, and appeals to geometric intuition!
+Weierstrass realised that this describes a single property of the real numbers, which distinguishes them from the rationals, namely the Completeness Property: Every non-empty set of real numbers with an upper bound has a least upper bound.
+It is easy to see that the rationals do not have the √ Completeness Property.
+Hence the rationals lack the Completeness Property.
+By contrast, the continuum “morally ought” to have the Completeness √ Property.
+That is just what we will get via Completeness.
+5.4 From Q to R In essence, the Completeness Property shows that any point α of the real line divides that line into two halves perfectly: those for which α is the least upper bound, and those for which α is the greatest lower bound.
+We begin with an easy one: α ≤ β iff α ⊆ β This definition of an order allows to state the central result, that the set of cuts has the Completeness Property.
+Now here is the proof of the result: Theorem 5.6.
+The set of cuts has the Completeness Property.
+SOME PHILOSOPHICAL REFLECTIONS So we have a bunch of entities which satisfy the Completeness Property.
+It was a profound insight, to see that the Completeness Property expresses the crucial difference between the reals and the rationals.
+We know that the notion of a complete ordered field is coherent, for the cuts form just such a field.
+The real increase in rigour came from the realisation that the reals have the Completeness Property; the ability to construct real numbers as particular sets is perhaps not, by itself, so very interesting.
+In particular: no one would ever want to invoke these constructions during a mathematical proof (excepting, of course, a proof that the constructions behaved as they were supposed to).
+For example, here is how to prove Associativity, in the case of addition: Proof.
+ARITHMETIZATION Equally, here is how to prove Additive Inverse: Proof.
+And here is a proof of Distributivity: Proof.
+In particular, we need to show that R constitutes a complete ordered field, i.e., an ordered field with the Completeness Property.
+Now, Theorem 5.6 established that R has the Completeness Property.
+But having done this, it is quite easy to show that these yield the right algebraic properties; that is: Theorem 5.11.
+It is harder to prove that the reals, so constructed, have the Completeness Property, so we will give the proof.
+(We will invoke Theorem 5.11 as we go.) Let h ∈ S and suppose, for reductio, that [ f ] < [ h] , so that 0R < [(h − f )] .
+if X is f -closed and o ∈ X, then clo f (o ) ⊆ X Proof.
+This is thanks to the following trivial consequence: Theorem 6.6 (Arithmetical induction).
+Admittedly, Theorem 6.6 formulates induction in set-theoretic terms.
+Then for any formula φ( x ), which may have parameters: if φ(o ) and (∀n ∈ N )( φ(n) → φ(s(n))), then (∀n ∈ N ) φ(n) Proof.
+Let X = {n ∈ N : φ(n)}, and now use Theorem 6.6 In this result, we spoke of a formula “having parameters”.
+6.4 Dedekind’s “Proof” of the Existence of an Infinite Set In this chapter, we have offered a set-theoretic treatment of the natural numbers, in terms of Dedekind algebras.
+(Indeed, Dedekind pushed this point home by proving that all Dedekind algebras are isomorphic (1888, Theorems 132–3).
+So, we may be on the way to realising Dedekind’s own ambitious project, which he explained thus: In science nothing capable of proof ought to be believed without proof.
+DEDEKIND’S “PROOF” or intuitions of space and time—that I rather consider it an immediate product of the pure laws of thought.
+(Just look back to Theorem 6.5.) Unless the existence of a Dedekind infinite set can be established via “logic” or “the pure laws of thought”, the project stalls.
+(Dedekind, 1888, §66) This is quite an astonishing thing to find in the middle of a book which largely consists of highly rigorous mathematical proofs.
+First: this “proof” scarcely has what we would now recognize as a “mathematical” character.
+Second: at least as we have presented Dedekind algebras, this “proof” has a straightforward technical shortcoming.
+6.5 Appendix: Proving Schröder-Bernstein Before we depart from naı̈ve set theory, we have one last naı̈ve (but sophisticated!) proof to consider.
+This is a proof of Schröder-Bernstein (Theorem 4.25): if A ⪯ B and B ⪯ A then A ≈ B; i.e., given injections f : A → B and g : B → A there is a bijection h : A → B.
+In fact, Dedekind provided a lovely proof of Schröder-Bernstein using this notion, and we will present it here.
+The proof closely follows Potter (2004, pp.
+A little googling will √ also convince you that this is a theorem—rather like the irrationality of 2—for which many interesting and different proofs exist.
+Given a bijection f : C → A, let F = Clo f (C \ B) and define a function g with domain C as follows: ( f ( x ) if x ∈ F g( x ) = x otherwise We’ll show that g is a bijection from C → B, from which it will follow that g ◦ f −1 : A → B is a bijection, completing the proof.
+Since x ∈ F and F is f -closed by Lemma 6.8, we have y = f ( x ) ∈ F, a contradiction.
+Finally, here is the proof of the main result.
+The first chapter is relatively rudimentary and just lists definitions and results, many proofs are not carried out but are left as exercises.
+The material on proof systems and the completeness theorem is included from the part on first-order logic, with the “FOL” tag set to false.
+This leaves out everything related to predicates, terms, and quantifiers, and replaces talk of structures M with talk about valuations v.
+It is planned to expand this part to include more detail, and to add further topics and results, such as truth-functional completeness.
+Release : 9f12419 (2026-05-25) 105 Chapter 7 Syntax and Semantics This is a very quick summary of definitions only.
+It should be expanded to provide a gentle intro to proofs by induction on formulas, with lots more examples.
+7.1 Introduction Propositional logic deals with formulas that are built from propositional variables using the propositional connectives ¬, ∧, ∨, →, and ↔.
+Intuitively, a propositional variable p stands for a sentence or proposition that is true or false.
+Whenever the “truth value” of the propositional variable in a formula is determined, so is the truth value of any formulas formed from them using propositional connectives.
+We say that propositional logic is truth functional, because its semantics is given by functions of truth values.
+We only consider two truth values true (T) and false (F), and so exclude from discussion the possibility that a statement may be neither true nor false, or only half true.
+We also concentrate only on connectives where the truth value of a formula built from them is completely determined by the truth values of its parts (and not, say, on its meaning).
+In particular, whether the truth value of conditionals in English is truth functional in this sense is contentious.
+The material conditional → is; other logics deal with conditionals that are not truth functional.
+In order to develop the theory and metatheory of truth-functional propositional logic, we must first define the syntax and semantics of its expressions.
+We will describe one way of constructing formulas from propositional variables using the connectives.
+PROPOSITIONAL FORMULAS tems will choose different symbols, will select different sets of connectives as primitive, and will use parentheses differently (or even not at all, as in the case of so-called Polish notation).
+What all approaches have in common, though, is that the formation rules define the set of formulas inductively.
+Giving the meaning of expressions is the domain of semantics.
+The central concept in semantics for propositional logic is that of satisfaction in a valuation.
+A valuation v assigns truth values T, F to the propositional variables.
+Any valuation determines a truth value v( φ) for any formula φ.
+A formula is satisfied in a valuation v iff v( φ) = T—we write this as v ⊨ φ.
+This relation can also be defined by induction on the structure of φ, using the truth functions for the logical connectives to define, say, satisfaction of φ ∧ ψ in terms of satisfaction (or not) of φ and ψ.
+On the basis of the satisfaction relation v ⊨ φ for sentences we can then define the basic semantic notions of tautology, entailment, and satisfiability.
+A formula is a tautology, ⊨ φ, if every valuation satisfies it, i.e., v( φ) = T for any v.
+It is entailed by a set of formulas, Γ ⊨ φ, if every valuation that satisfies all the formulas in Γ also satisfies φ.
+And a set of formulas is satisfiable if some valuation satisfies all formulas in it at the same time.
+Because formulas are inductively defined, and satisfaction is in turn defined by induction on the structure of formulas, we can use induction to prove properties of our semantics and to relate the semantic notions defined.
+7.2 Propositional Formulas Formulas of propositional logic are built up from propositional variables and the propositional constant ⊥ using logical connectives.
+The logical connectives: ¬ (negation), ∧ (conjunction), ∨ (disjunction), → (conditional) 4.
+SYNTAX AND SEMANTICS if we only used primitive symbols, get quite long.
+The bigger advantage, however, is that proofs become shorter.
+If a symbol is primitive, it has to be treated separately in proofs.
+The more primitive symbols, therefore, the longer our proofs.
+for “negation”, ∧, ·, and & for “conjunction”.
+Commonly used symbols for the “conditional” or “implication” are →, ⇒, and ⊃.
+Symbols for “biconditional,” “bi-implication,” or “(material) equivalence” are ↔, ⇔, and ≡.
+The ⊥ symbol is variously called “falsity,” “falsum,” “absurdity,” or “bottom.” The ⊤ symbol is variously called “truth,” “verum,” or “top.” Definition 7.1 (Formula).
+The set Frm(L0 ) of formulas of propositional logic is defined inductively as follows: 1.
+Every propositional variable pi is an atomic formula.
+If φ is a formula, then ¬ φ is a formula.
+If φ and ψ are formulas, then ( φ ∧ ψ) is a formula.
+If φ and ψ are formulas, then ( φ ∨ ψ) is a formula.
+If φ and ψ are formulas, then ( φ → ψ) is a formula.
+The definition of formulas is an inductive definition.
+Essentially, we construct the set of formulas in infinitely many stages.
+In the initial stage, we pronounce all atomic formulas to be formulas; this corresponds to the first few cases of the definition, i.e., the cases for ⊥, pi .
+“Atomic formula” thus means any formula of this form.
+The other cases of the definition give rules for constructing new formulas out of formulas already constructed.
+At the second stage, we can use them to construct formulas out of atomic formulas.
+At the third stage, we construct new formulas from the atomic formulas and those obtained in the second stage, and so on.
+A formula is anything that is eventually constructed at such a stage, and nothing else.
+When writing a formula (ψ ∗ χ) constructed from ψ, χ using a two-place connective ∗, we will often leave out the outermost pair of parentheses and write simply ψ ∗ χ.
+Formulas constructed using the defined operators are to be understood as follows: 1.
+7.3 Preliminaries Theorem 7.4 (Principle of induction on formulas).
+If some property P holds for all the atomic formulas and is such that 1.
+it holds for ( φ → ψ) whenever it holds for φ and ψ; then P holds for all formulas.
+Let S be the collection of all formulas with property P.
+S satisfies all the conditions of Definition 7.1: it contains all atomic formulas and is closed under the logical operators.
+So Frm(L0 ) = S, and every formula has property P.
+Any formula in Frm(L0 ) is balanced, in that it has as many left parentheses as right ones.
+No proper initial segment of a formula is a formula.
+Any formula φ in Frm(L0 ) has exactly one parsing as one of the following 1.
+If φ and ψ are formulas, and pi is a propositional variable, then φ[ψ/pi ] denotes the result of replacing each occurrence of pi by an occurrence of ψ in φ; similarly, the simultaneous substitution of p1 , .
+7.4 Formation Sequences Defining formulas via an inductive definition, and the complementary technique of proving properties of formulas via induction, is an elegant and efficient approach.
+However, it can also be useful to consider a more bottom-up, step-by-step approach to the construction of formulas, which we do here using the notion of a formation sequence.
+Definition 7.9 (Formation sequences for formulas).
+, φn ⟩ of strings of symbols from the language L0 is a formation sequence for φ if φ ≡ φn and for all i ≤ n, either φi is an atomic formula or there exist j, k < i such that one of the following holds: 1.
+As can be seen from the second example, formation sequences may contain ‘junk’: formulas which are redundant or do not contribute to the construction.
+Every formula φ in Frm(L0 ) has a formation sequence.
+By the principle of induction on formulas, every formula has a formation sequence.
+This is important because it shows that our two ways of defining formulas are equivalent: they give the same results.
+It also means that we can prove theorems about formulas by using ordinary induction on the length of formation sequences.
+SYNTAX AND SEMANTICS Now we reason by cases.
+Therefore by the induction hypothesis, φ j and φk are in Frm(L0 ), and so by the definition of a formula, so is ( φ j ∧ φk ).
+7.5 Valuations and Satisfaction Definition 7.14 (Valuations).
+Let {T, F} be the set of the two truth values, “true” and “false.” A valuation for L0 is a function v assigning either T or F to the propositional variables of the language, i.e., v : At0 → {T, F}.
+Given a valuation v, define the evaluation function v : Frm(L0 ) → {T, F} inductively by: v(⊥) = F; v(pn ) = v(pn ); ( T if v( φ) = F; v(¬ φ) = F otherwise.
+The clauses correspond to the following truth tables: φ T F 112 ¬φ F T φ ψ φ∧ψ φ ψ φ∨ψ T T F F T F T F T F F F T T F F T F T F T T T F φ ψ φ→ψ T T F F T F T F T F T T Release : 9f12419 (2026-05-25) 7.6.
+SEMANTIC NOTIONS Theorem 7.16 (Local Determination).
+Suppose that v1 and v2 are valuations that agree on the propositional variables occurring in φ, i.e., v1 (pn ) = v2 (pn ) whenever pn occurs in some formula φ.
+We can inductively define the notion of satisfaction of a formula φ by a valuation v, v ⊨ φ, as follows.
+If Γ is a set of formulas, v ⊨ Γ iff v ⊨ φ for every φ ∈ Γ.
+7.6 Semantic Notions We define the following semantic notions: Definition 7.19.
+A formula φ is satisfiable if for some v, v ⊨ φ; it is unsatisfiable if for no v, v ⊨ φ; 2.
+A formula φ is a tautology if v ⊨ φ for all valuations v; 3.
+A formula φ is contingent if it is satisfiable but not a tautology; 4.
+If Γ is a set of formulas, Γ ⊨ φ (“Γ entails φ”) if and only if v ⊨ φ for every valuation v for which v ⊨ Γ.
+If Γ is a set of formulas, Γ is satisfiable if there is a valuation v for which v ⊨ Γ, and Γ is unsatisfiable otherwise.
+φ is a tautology if and only if ∅ ⊨ φ; 2.
+If Γ is satisfiable then every finite subset of Γ is also satisfiable; Release : 9f12419 (2026-05-25) 113 CHAPTER 7.
+Theorem 7.22 (Semantic Deduction Theorem).
+For each of the five formulas below determine whether the formula can be expressed as a substitution φ[ψ/pi ] where φ is (i) p0 ; (ii) (¬p0 ∧ p1 ); and (iii) ((¬p0 → p1 ) ∧ p2 ).
+Consider adding to L0 a ternary connective ♢ with evaluation given by ( v(ψ) if v( φ) = T; v(♢( φ, ψ, χ)) = v(χ) if v( φ) = F.
+Write down the truth table for this connective.
+For each of the following four formulas determine whether it is (a) satisfiable, (b) tautology, and (c) contingent.
+Prove Theorem 7.22 Release : 9f12419 (2026-05-25) 115 Chapter 8 Derivation Systems This chapter collects general material on derivation systems.
+8.1 Introduction Logics commonly have both a semantics and a derivation system.
+The semantics concerns concepts such as truth, satisfiability, validity, and entailment.
+The purpose of derivation systems is to provide a purely syntactic method of establishing entailment and validity.
+They are purely syntactic in the sense that a derivation in such a system is a finite syntactic object, usually a sequence (or other finite arrangement) of sentences or formulas.
+Good derivation systems have the property that any given sequence or arrangement of sentences or formulas can be verified mechanically to be “correct.” The simplest (and historically first) derivation systems for first-order logic were axiomatic.
+Axiomatic derivation systems are easy to describe—and also easy to handle meta-theoretically—but derivations in them are hard to read and understand, and are also hard to produce.
+Other derivation systems have been developed with the aim of making it easier to construct derivations or easier to understand derivations once they are complete.
+Examples are natural deduction, truth trees, also known as tableaux proofs, and the sequent calculus.
+INTRODUCTION signed especially with mechanization in mind, e.g., the resolution method is easy to implement in software (but its derivations are essentially impossible to understand).
+Most of these other derivation systems represent derivations as trees of formulas rather than sequences.
+This makes it easier to see which parts of a derivation depend on which other parts.
+So for a given logic, such as first-order logic, the different derivation systems will give different explications of what it is for a sentence to be a theorem and what it means for a sentence to be derivable from some others.
+However that is done (via axiomatic derivations, natural deductions, sequent derivations, truth trees, resolution refutations), we want these relations to match the semantic notions of validity and entailment.
+Let’s write ⊢ φ for “φ is a theorem” and “Γ ⊢ φ” for “φ is derivable from Γ.” However ⊢ is defined, we want it to match up with ⊨, that is: 1.
+Γ ⊢ φ if and only if Γ ⊨ φ The “only if” direction of the above is called soundness.
+A derivation system is sound if derivability guarantees entailment (or validity).
+Every decent derivation system has to be sound; unsound derivation systems are not useful at all.
+After all, the entire purpose of a derivation is to provide a syntactic guarantee of validity or entailment.
+We’ll prove soundness for the derivation systems we present.
+The converse “if” direction is also important: it is called completeness.
+A complete derivation system is strong enough to show that φ is a theorem whenever φ is valid, and that Γ ⊢ φ whenever Γ ⊨ φ.
+Completeness is harder to establish, and some logics have no complete derivation systems.
+Kurt Gödel was the first one to prove completeness for a derivation system of first-order logic in his 1929 dissertation.
+Another concept that is connected to derivation systems is that of consistency.
+A set of sentences is called inconsistent if anything whatsoever can be derived from it, and consistent otherwise.
+Inconsistency is the syntactic counterpart to unsatisfiablity: like unsatisfiable sets, inconsistent sets of sentences do not make good theories, they are defective in a fundamental way.
+Consistent sets of sentences may not be true or useful, but at least they pass that minimal threshold of logical usefulness.
+For different derivation systems the specific definition of consistency of sets of sentences might differ, but like ⊢, we want consistency to coincide with its semantic counterpart, satisfiability.
+We want it to always be the case that Γ is consistent if and only if it is satisfiable.
+Here, the “only if” direction amounts to completeness (consistency guarantees satisfiability), and the “if” direction amounts to soundness (satisfiability guarantees consistency).
+In fact, for classical first-order logic, the two versions of soundness and completeness are equivalent.
+DERIVATION SYSTEMS 8.2 The Sequent Calculus While many derivation systems operate with arrangements of sentences, the sequent calculus operates with sequents.
+, ψm , that is a pair of sequences of sentences, separated by the sequent symbol ⇒.
+A derivation in the sequent calculus is a tree of sequents, where the topmost sequents are of a special form (they are called “initial sequents” or “axioms”) and every other sequent follows from the sequents immediately above it by one of the rules of inference.
+The rules of inference either manipulate the sentences in the sequents (adding, removing, or rearranging them on either the left or the right), or they introduce a complex formula in the conclusion of the rule.
+For instance, the ∧L rule allows the inference from φ, Γ ⇒ ∆ to φ ∧ ψ, Γ ⇒ ∆, and the →R allows the inference from φ, Γ ⇒ ∆, ψ to Γ ⇒ ∆, φ → ψ, for any Γ, ∆, φ, and ψ.
+(In particular, Γ and ∆ may be empty.) The ⊢ relation based on the sequent calculus is defined as follows: Γ ⊢ φ iff there is some sequence Γ0 such that every φ in Γ0 is in Γ and there is a derivation with the sequent Γ0 ⇒ φ at its root.
+φ is a theorem in the sequent calculus if the sequent ⇒ φ has a derivation.
+For instance, here is a derivation that shows that ⊢ ( φ ∧ ψ) → φ: φ ⇒ φ ∧L φ∧ψ ⇒ φ →R ⇒ ( φ ∧ ψ) → φ A set Γ is inconsistent in the sequent calculus if there is a derivation of Γ0 ⇒ (where every φ ∈ Γ0 is in Γ and the right side of the sequent is empty).
+Using the rule WR, any sentence can be derived from an inconsistent set.
+Because of its systematic and symmetric design, it is a very useful formalism for developing a theory of derivations.
+It is relatively easy to find derivations in the sequent calculus, but these derivations are often hard to read and their connection to proofs are sometimes not easy to see.
+It has proved to be a very elegant approach to derivation systems, however, and many logics have sequent calculus systems.
+8.3 Natural Deduction Natural deduction is a derivation system intended to mirror actual reasoning (especially the kind of regimented reasoning employed by mathematicians).
+NATURAL DEDUCTION proof by cases allows us to establish a conclusion on the basis of a disjunctive premise, by establishing that the conclusion follows from either of the disjuncts.
+Indirect proof allows us to establish a conclusion by showing that its negation leads to a contradiction.
+Conditional proof establishes a conditional claim “if .
+Natural deduction is a formalization of some of these natural inferences.
+Each of the logical connectives and quantifiers comes with two rules, an introduction and an elimination rule, and they each correspond to one such natural inference pattern.
+For instance, →Intro corresponds to conditional proof, and ∨Elim to proof by cases.
+A particularly simple rule is ∧Elim which allows the inference from φ ∧ ψ to φ (or ψ).
+One feature that distinguishes natural deduction from other derivation systems is its use of assumptions.
+A derivation in natural deduction is a tree of formulas.
+A single formula stands at the root of the tree of formulas, and the “leaves” of the tree are formulas from which the conclusion is derived.
+In natural deduction, some leaf formulas play a role inside the derivation but are “used up” by the time the derivation reaches the conclusion.
+For instance, in a proof by cases, we assume the truth of each of the disjuncts; in conditional proof, we assume the truth of the antecedent; in indirect proof, we assume the truth of the negation of the conclusion.
+The formulas at the leaves of a natural deduction derivation are called assumptions, and some of the rules of inference may “discharge” them.
+For instance, if we have a derivation of ψ from some assumptions which include φ, then the →Intro rule allows us to infer φ → ψ and discharge any assumption of the form φ.
+The relation Γ ⊢ φ based on natural deduction holds iff there is a derivation in which φ is the last sentence in the tree, and every leaf which is undischarged is in Γ.
+φ is a theorem in natural deduction iff there is a derivation in which φ is the last sentence and all assumptions are discharged.
+The rule ⊥ I makes it so that from an inconsistent set, any sentence can be derived.
+Because its inferences mirror natural methods of proof, it is favored by philosophers.
+In the philosophy of logic, the rules of natural deduction have sometimes been taken to give the meanings of the logical operators (“proof-theoretic semantics”).
+8.4 Tableaux While many derivation systems operate with arrangements of sentences, tableaux operate with signed formulas.
+A signed formula is a pair consisting of a truth value sign (T or F) and a sentence T φ or F φ.
+A tableau consists of signed formulas arranged in a downward-branching tree.
+It begins with a number of assumptions and continues with signed formulas which result from one of the signed formulas above it by applying one of the rules of inference.
+Each rule allows us to add one or more signed formulas to the end of a branch, or two signed formulas side by side—in this case a branch splits into two, with the two added signed formulas forming the ends of the two branches.
+A rule applied to a complex signed formula results in the addition of signed formulas which are immediate sub-formulas.
+For instance, the ∧T rule applies to T φ ∧ ψ, and allows the addition of both the two signed formulas T φ and Tψ to the end of any branch containing T φ ∧ ψ, and the rule φ ∧ ψF allows a branch to be split by adding F φ and F ψ side-by-side.
+A tableau is closed if every one of its branches contains a matching pair of signed formulas T φ and F φ.
+However, a tableau is often hard to read and their connection to proofs are sometimes not easy to see.
+Tableaux also help us to find structures that satisfy given (sets of) sentences: if the set is satisfiable, it won’t have a closed tableau, i.e., any tableau will have an open branch.
+There is also a very close connection to the sequent calculus: essentially, a closed tableau is a condensed derivation in the sequent calculus, written upside-down.
+8.5 Axiomatic Derivations Axiomatic derivations are the oldest and simplest logical derivation systems.
+Its derivations are simply sequences of sentences.
+A sequence of sentences counts as a correct derivation if every sentence φ in it satisfies one of the following conditions: 1.
+φ is an element of a given set Γ of sentences, or 3.
+To be an axiom, φ has to have the form of one of a number of fixed sentence schemas.
+There are many sets of axiom schemas that provide a satisfactory (sound and complete) derivation system for first-order logic.
+Some are organized according to the connectives they govern, e.g., the schemas φ → (ψ → φ) Release : 9f12419 (2026-05-25) ψ → (ψ ∨ χ) (ψ ∧ χ) → ψ 121 CHAPTER 8.
+DERIVATION SYSTEMS are common axioms that govern →, ∨ and ∧.
+Some axiom systems aim at a minimal number of axioms.
+Depending on the connectives that are taken as primitives, it is even possible to find axiom systems that consist of a single axiom.
+A rule of inference is a conditional statement that gives a sufficient condition for a sentence in a derivation to be justified.
+Modus ponens is one very common such rule: it says that if φ and φ → ψ are already justified, then ψ is justified.
+This means that a line in a derivation containing the sentence ψ is justified, provided that both φ and φ → ψ (for some sentence φ) appear in the derivation before ψ.
+The ⊢ relation based on axiomatic derivations is defined as follows: Γ ⊢ φ iff there is a derivation with the sentence φ as its last formula (and Γ is taken as the set of sentences in that derivation which are justified by (2) above).
+φ is a theorem if φ has a derivation where Γ is empty, i.e., every sentence in the derivation is justified either by (1) or (3).
+For instance, here is a derivation that shows that ⊢ φ → (ψ → (ψ ∨ φ)): 1.
+ψ → (ψ ∨ φ) (ψ → (ψ ∨ φ)) → ( φ → (ψ → (ψ ∨ φ))) φ → (ψ → (ψ ∨ φ)) The sentence on line 1 is of the form of the axiom φ → ( φ ∨ ψ) (with the roles of φ and ψ reversed).
+The sentence on line 2 is of the form of the axiom φ → (ψ → φ).
+Line 3 is justified by modus ponens: if we abbreviate it as θ, then line 2 has the form χ → θ, where χ is ψ → (ψ ∨ φ), i.e., line 1.
+A complete axiom system will also prove that ⊥ → φ for any φ, and so if Γ is inconsistent, then Γ ⊢ φ for any φ.
+Systems of axiomatic derivations for logic were first given by Gottlob Frege in his 1879 Begriffsschrift, which for this reason is often considered the first work of modern logic.
+They are thus often called “Frege systems” or “Hilbert systems.” They are very versatile in that it is often easy to find an axiomatic system for a logic.
+Because derivations have a very simple structure and only one or two inference rules, it is also relatively easy to prove things about them.
+However, they are very hard to use in practice, i.e., it is difficult to find and write proofs.
+To include or exclude material relevant to the sequent calculus as a proof system, use the “prfLK” tag.
+9.1 Rules and Derivations For the following, let Γ, ∆, Π, Λ represent finite sequences of sentences.
+A sequent is an expression of the form Γ⇒∆ where Γ and ∆ are finite (possibly empty) sequences of sentences of the language L.
+The intuitive idea behind a sequent is: if all of the sentences in the antecedent hold, then at least one of the sentences in the succedent holds.
+We say a sequent is valid iff the corresponding sentence is valid.
+If Γ is a sequence of sentences, we write Γ, φ for the result of appending φ to the right end of Γ (and φ, Γ for the result of appending φ to the left end of Γ).
+If ∆ is a sequence of sentences also, then Γ, ∆ is the concatenation of the two sequences.
+Derivations in the sequent calculus are certain trees of sequents, where the topmost sequents are initial sequents, and if a sequent stands below one or two other sequents, it must follow correctly by a rule of inference.
+The logical rules are named for the main operator of the sentence containing φ and/or ψ in the lower sequent.
+Each one comes in two versions, one for inferring a sequent with the sentence containing the logical operator on the left, and one with the sentence on the right.
+STRUCTURAL RULES Rules for → Γ ⇒ ∆, φ ψ, Π ⇒ Λ →L φ → ψ, Γ, Π ⇒ ∆, Λ 9.3 φ, Γ ⇒ ∆, ψ →R Γ ⇒ ∆, φ → ψ Structural Rules We also need a few rules that allow us to rearrange sentences in the left and right side of a sequent.
+Since the logical rules require that the sentences in the premise which the rule acts upon stand either to the far left or to the far right, we need an “exchange” rule that allows us to move sentences to the right position.
+It’s also important sometimes to be able to combine two identical sentences into one, and to add a sentence on either side.
+The following rule, called “cut,” is not strictly speaking necessary, but makes it a lot easier to reuse and combine derivations.
+THE SEQUENT CALCULUS 9.4 Derivations We’ve said what an initial sequent looks like, and we’ve given the rules of inference.
+Derivations in the sequent calculus are inductively generated from these: each derivation either is an initial sequent on its own, or consists of one or two derivations followed by an inference.
+An LK-derivation of a sequent S is a finite tree of sequents satisfying the following conditions: 1.
+Every sequent in the tree except S is a premise of a correct application of an inference rule whose conclusion stands directly below that sequent in the tree.
+We then say that S is the end-sequent of the derivation and that S is derivable in LK (or LK-derivable).
+Every initial sequent, e.g., χ ⇒ χ is a derivation.
+We can obtain a new derivation from this by applying, say, the WL rule, Γ ⇒ ∆ WL φ, Γ ⇒ ∆ The rule, however, is meant to be general: we can replace the φ in the rule with any sentence, e.g., also with θ.
+If the premise matches our initial sequent χ ⇒ χ, that means that both Γ and ∆ are just χ, and the conclusion would then be θ, χ ⇒ χ.
+So, the following is a derivation: χ ⇒ χ WL θ, χ ⇒ χ We can now apply another rule, say XL, which allows us to switch two sentences on the left.
+So, the following is also a correct derivation: χ ⇒ χ WL θ, χ ⇒ χ XL χ, θ ⇒ χ In this application of the rule, which was given as Γ, φ, ψ, Π ⇒ ∆ XL Γ, ψ, φ, Π ⇒ ∆, both Γ and Π were empty, ∆ is χ, and the roles of φ and ψ are played by θ and χ, respectively.
+EXAMPLES OF DERIVATIONS θ ⇒ θ WL χ, θ ⇒ θ is a derivation.
+Now we can take these two derivations, and combine them using ∧R.
+That rule was Γ ⇒ ∆, φ Γ ⇒ ∆, ψ ∧R Γ ⇒ ∆, φ ∧ ψ In our case, the premises must match the last sequents of the derivations ending in the premises.
+So the conclusion, if the inference should be correct, is χ, θ ⇒ χ ∧ θ.
+χ ⇒ χ WL θ, χ ⇒ χ θ ⇒ θ XL WL χ, θ ⇒ χ χ, θ ⇒ θ ∧R χ, θ ⇒ χ ∧ θ Of course, we can also reverse the premises, then φ would be θ and ψ would be χ.
+χ ⇒ χ WL θ, χ ⇒ χ θ ⇒ θ WL XL χ, θ ⇒ θ χ, θ ⇒ χ ∧R χ, θ ⇒ θ ∧ χ 9.5 Examples of Derivations Example 9.5.
+Give an LK-derivation for the sequent φ ∧ ψ ⇒ φ.
+We begin by writing the desired end-sequent at the bottom of the derivation.
+φ∧ψ ⇒ φ Next, we need to figure out what kind of inference could have a lower sequent of this form.
+The only logical connective occurring in the lower sequent is ∧, so we’re looking for an ∧ rule, and since the ∧ symbol occurs in the antecedent, we’re looking at the ∧L rule.
+φ∧ψ ⇒ φ ∧L There are two options for what could have been the upper sequent of the ∧L inference: we could have an upper sequent of φ ⇒ φ, or of ψ ⇒ φ.
+Clearly, φ ⇒ φ is an initial sequent (which is a good thing), while ψ ⇒ φ is not derivable in general.
+THE SEQUENT CALCULUS φ ⇒ φ ∧L φ∧ψ ⇒ φ We now have a correct LK-derivation of the sequent φ ∧ ψ ⇒ φ.
+Give an LK-derivation for the sequent ¬ φ ∨ ψ ⇒ φ → ψ.
+Begin by writing the desired end-sequent at the bottom of the derivation.
+¬φ ∨ ψ ⇒ φ → ψ To find a logical rule that could give us this end-sequent, we look at the logical connectives in the end-sequent: ¬, ∨, and →.
+We only care at the moment about ∨ and → because they are main operators of sentences in the endsequent, while ¬ is inside the scope of another connective, so we will take care of it later.
+Our options for logical rules for the final inference are therefore the ∨L rule and the →R rule.
+According to the form of →R inferences which can yield the lower sequent, this must look like: φ, ¬ φ ∨ ψ ⇒ ψ ¬ φ ∨ ψ ⇒ φ → ψ →R If we move ¬ φ ∨ ψ to the outside of the antecedent, we can apply the ∨L rule.
+EXAMPLES OF DERIVATIONS ψ ⇒ ψ WL φ, ψ ⇒ ψ φ ⇒ ψ, φ ¬L XL ¬ φ, φ ⇒ ψ ψ, φ ⇒ ψ ∨L ¬ φ ∨ ψ, φ ⇒ ψ XR φ, ¬ φ ∨ ψ ⇒ ψ ¬ φ ∨ ψ ⇒ φ → ψ →R Similarly to how we finished off the right branch, we are just one weakening and one exchange away from finishing off this left branch as well.
+Give an LK-derivation of the sequent ¬ φ ∨ ¬ψ ⇒ ¬( φ ∧ ψ) Using the techniques from above, we start by writing the desired endsequent at the bottom.
+¬ φ ∨ ¬ψ ⇒ ¬( φ ∧ ψ) The available main connectives of sentences in the end-sequent are the ∨ symbol and the ¬ symbol.
+Since the derivation is symmetric with regards to φ and ψ, let’s go with the former: φ, ¬ φ ∨ ¬ψ ⇒ ∧L φ ∧ ψ, ¬ φ ∨ ¬ψ ⇒ ¬R ¬ φ ∨ ¬ψ ⇒ ¬( φ ∧ ψ) Continuing to fill in the derivation, we see that we run into a problem: Release : 9f12419 (2026-05-25) 129 CHAPTER 9.
+Applying ∨R backwards would give us one of these two derivations: ⇒ φ ⇒ φ ∨ ¬ φ ∨R φ ⇒ ⇒ ¬ φ ¬R ⇒ φ ∨ ¬ φ ∨R Neither of these of course ends in an initial sequent.
+The trick is to realize that the contraction rule allows us to combine two copies of a sentence into one— and when we’re searching for a proof, i.e., going from bottom to top, we can keep a copy of φ ∨ ¬ φ in the premise, e.g., 130 Release : 9f12419 (2026-05-25) 9.6.
+PROOF-THEORETIC NOTIONS ⇒ φ ∨ ¬ φ, φ ⇒ φ ∨ ¬ φ, φ ∨ ¬ φ ∨R CR ⇒ φ ∨ ¬φ Now we can apply ∨R a second time, and also get ¬ φ, which leads to a complete derivation.
+9.6 Proof-Theoretic Notions Just as we’ve defined a number of important semantic notions (validity, entailment, satisfiability), we now define corresponding proof-theoretic notions.
+These are not defined by appeal to satisfaction of sentences in structures, but by appeal to the derivability or non-derivability of certain sequents.
+That they do is the content of the soundness and completeness theorem.
+A sentence φ is a theorem if there is a derivation in LK of the sequent ⇒ φ.
+We write ⊢ φ if φ is a theorem and ⊬ φ if it is not.
+A sentence φ is derivable from a set of sentences Γ, Γ ⊢ φ, iff there is a finite subset Γ0 ⊆ Γ and a sequence Γ0′ of the sentences in Γ0 such that LK derives Γ0′ ⇒ φ.
+If φ is not derivable from Γ we write Γ ⊬ φ.
+Because of the contraction, weakening, and exchange rules, the order and number of sentences in Γ0′ does not matter: if a sequent Γ0′ ⇒ φ is derivable, then so is Γ0′′ ⇒ φ for any Γ0′′ that contains the same sentences as Γ0′ .
+For instance, if Γ0 = {ψ, χ} then both Γ0′ = ⟨ψ, ψ, χ⟩ and Γ0′′ = ⟨χ, χ, ψ⟩ are sequences containing just the sentences in Γ0 .
+If a sequent containing one is derivable, so is the other, e.g.: Release : 9f12419 (2026-05-25) 131 CHAPTER 9.
+A set of sentences Γ is inconsistent iff there is a finite subset Γ0 ⊆ Γ such that LK derives Γ0 ⇒ .
+If Γ is not inconsistent, i.e., if for every finite Γ0 ⊆ Γ, LK does not derive Γ0 ⇒ , we say it is consistent.
+The initial sequent φ ⇒ φ is derivable, and { φ} ⊆ Γ.
+Suppose Γ ⊢ φ, i.e., there is a finite Γ0 ⊆ Γ such that Γ0 ⇒ φ is derivable.
+The derivation of Γ0 ⇒ φ thus also shows ∆ ⊢ φ.
+If Γ ⊢ φ, there is a finite Γ0 ⊆ Γ and a derivation π0 of Γ0 ⇒ φ.
+If { φ} ∪ ∆ ⊢ ψ, then for some finite subset ∆ 0 ⊆ ∆, there is a derivation π1 of φ, ∆ 0 ⇒ ψ.
+Consider the following derivation: π1 π0 Γ0 ⇒ φ φ, ∆ 0 ⇒ ψ Cut Γ0 , ∆ 0 ⇒ ψ Since Γ0 ∪ ∆ 0 ⊆ Γ ∪ ∆, this shows Γ ∪ ∆ ⊢ ψ.
+Γ is inconsistent iff Γ ⊢ φ for every sentence φ.
+If Γ ⊢ φ, then there is a finite subset Γ0 ⊆ Γ such that the sequent Γ0 ⇒ φ has a derivation.
+If Γ is inconsistent, there is a finite subset Γ0 ⊆ Γ such that LK derives Γ0 ⇒ .
+9.7 Derivability and Consistency We will now establish a number of properties of the derivability relation.
+They are independently interesting, but each will play a role in the proof of the completeness theorem.
+There are finite Γ0 and Γ1 ⊆ Γ such that LK derives Γ0 ⇒ φ and φ, Γ1 ⇒ .
+Let the LK-derivation of Γ0 ⇒ φ be π0 and the LK-derivation of Γ1 , φ ⇒ be π1 .
+We can then derive π0 φ, Γ1 ⇒ Γ0 ⇒ φ Γ0 , Γ1 ⇒ π1 Cut Since Γ0 ⊆ Γ and Γ1 ⊆ Γ, Γ0 ∪ Γ1 ⊆ Γ, hence Γ is inconsistent.
+First suppose Γ ⊢ φ, i.e., there is a derivation π0 of Γ ⇒ φ.
+By adding a ¬L rule, we obtain a derivation of ¬ φ, Γ ⇒ , i.e., Γ ∪ {¬ φ} is inconsistent.
+If Γ ∪ {¬ φ} is inconsistent, there is a derivation π1 of ¬ φ, Γ ⇒ .
+The following is a derivation of Γ ⇒ φ: φ ⇒ φ ⇒ φ, ¬ φ ¬R ¬ φ, Γ ⇒ Γ ⇒ φ π1 Cut Proposition 9.19.
+Then there is a derivation π of a sequent Γ0 ⇒ φ.
+The sequent ¬ φ, Γ0 ⇒ is also derivable: Release : 9f12419 (2026-05-25) 133 CHAPTER 9.
+There are finite sets Γ0 ⊆ Γ and Γ1 ⊆ Γ and LK-derivations π0 and π1 of φ, Γ0 ⇒ and ¬ φ, Γ1 ⇒ , respectively.
+We can then derive π0 φ, Γ0 ⇒ ¬R ¬ φ, Γ1 ⇒ Γ0 ⇒ ¬ φ Γ0 , Γ1 ⇒ π1 Cut Since Γ0 ⊆ Γ and Γ1 ⊆ Γ, Γ0 ∪ Γ1 ⊆ Γ.
+9.8 Derivability and the Propositional Connectives We establish that the derivability relation ⊢ of the sequent calculus is strong enough to establish some basic facts involving the propositional connectives, such as that φ ∧ ψ ⊢ φ and φ, φ → ψ ⊢ ψ (modus ponens).
+These facts are needed for the proof of the completeness theorem.
+Both sequents φ ∧ ψ ⇒ φ and φ ∧ ψ ⇒ ψ are derivable: φ ⇒ φ ∧L φ∧ψ ⇒ φ ψ ⇒ ψ ∧L φ∧ψ ⇒ ψ 2.
+Here is a derivation of the sequent φ, ψ ⇒ φ ∧ ψ: φ ⇒ φ ψ ⇒ ψ ∧R φ, ψ ⇒ φ ∧ ψ Proposition 9.22.
+We give a derivation of the sequent φ ∨ ψ, ¬ φ, ¬ψ ⇒: φ ⇒ φ ¬L ¬ φ, φ ⇒ ψ ⇒ ψ ¬L ¬ψ, ψ ⇒ φ, ¬ φ, ¬ψ ⇒ ψ, ¬ φ, ¬ψ ⇒ φ ∨ ψ, ¬ φ, ¬ψ ⇒ ∨L (Recall that double inference lines indicate several weakening, contraction, and exchange inferences.) 2.
+Both sequents φ ⇒ φ ∨ ψ and ψ ⇒ φ ∨ ψ have derivations: φ ⇒ φ ∨R φ ⇒ φ∨ψ Proposition 9.23.
+The sequent φ → ψ, φ ⇒ ψ is derivable: φ ⇒ φ ψ ⇒ ψ →L φ → ψ, φ ⇒ ψ 2.
+Both sequents ¬ φ ⇒ φ → ψ and ψ ⇒ φ → ψ are derivable: φ ⇒ φ ¬L ¬ φ, φ ⇒ XL φ, ¬ φ ⇒ WR φ, ¬ φ ⇒ ψ ¬ φ ⇒ φ → ψ →R 9.9 ψ ⇒ ψ WL φ, ψ ⇒ ψ →R ψ ⇒ φ→ψ Soundness A derivation system, such as the sequent calculus, is sound if it cannot derive things that do not actually hold.
+Soundness is thus a kind of guaranteed safety property for derivation systems.
+Depending on which proof theoretic property is in question, we would like to know for instance, that 1.
+if a sentence is derivable from some others, it is also a consequence of them; 3.
+if a set of sentences is inconsistent, it is unsatisfiable.
+THE SEQUENT CALCULUS These are important properties of a derivation system.
+If any of them do not hold, the derivation system is deficient—it would derive too much.
+Consequently, establishing the soundness of a derivation system is of the utmost importance.
+Because all these proof-theoretic properties are defined via derivability in the sequent calculus of certain sequents, proving (1)–(3) above requires proving something about the semantic properties of derivable sequents.
+We will first define what it means for a sequent to be valid, and then show that every derivable sequent is valid.
+A valuation v satisfies a sequent Γ ⇒ ∆ iff either v ⊭ φ for some φ ∈ Γ or v ⊨ φ for some φ ∈ ∆.
+A sequent is valid iff every valuation v satisfies it.
+If LK derives Θ ⇒ Ξ, then Θ ⇒ Ξ is valid.
+We proceed by induction on the number of inferences n in π.
+If the number of inferences is 0, then π consists only of an initial sequent.
+Every initial sequent φ ⇒ φ is obviously valid, since for every v, either v ⊭ φ or v ⊨ φ.
+If the number of inferences is greater than 0, we distinguish cases according to the type of the lowermost inference.
+By induction hypothesis, we can assume that the premises of that inference are valid, since the number of inferences in the derivation of any premise is smaller than n.
+First, we consider the possible inferences with only one premise.
+The last inference is ¬L: Then the premise of the last inference is Γ ⇒ ∆, φ and the conclusion is ¬ φ, Γ ⇒ ∆, i.e., the derivation ends in 136 Release : 9f12419 (2026-05-25) 9.9.
+SOUNDNESS Γ ⇒ ∆, φ ¬L ¬ φ, Γ ⇒ ∆ and Θ = ¬ φ, Γ while Ξ = ∆.
+The induction hypothesis tells us that Γ ⇒ ∆, φ is valid, i.e., for every v, either (a) for some χ ∈ Γ, v ⊭ χ, or (b) for some χ ∈ ∆, v ⊨ χ, or (c) v ⊨ φ.
+We want to show that Θ ⇒ Ξ is also valid.
+The last inference is ∧L: There are two variants: φ ∧ ψ may be inferred on the left from φ or from ψ on the left side of the premise.
+Since by induction hypothesis, φ, Γ ⇒ ∆ is valid, (a) v ⊭ φ, (b) v ⊭ χ for some χ ∈ Γ, or (c) v ⊨ χ for some χ ∈ ∆.
+The last inference is ∨R: There are two variants: φ ∨ ψ may be inferred on the right from φ or from ψ on the right side of the premise.
+Since Γ ⇒ ∆, φ is valid, (a) v ⊨ φ, (b) v ⊭ χ for some χ ∈ Γ, or (c) v ⊨ χ for some χ ∈ ∆.
+The last inference is →R: Then π ends in φ, Γ ⇒ ∆, ψ →R Γ ⇒ ∆, φ → ψ Again, the induction hypothesis says that the premise is valid; we want to show that the conclusion is valid as well.
+Since φ, Γ ⇒ ∆, ψ is valid, at least one of the following cases obtains: (a) v ⊭ φ, (b) v ⊨ ψ, (c) v ⊭ χ for some χ ∈ Γ, or (d) v ⊨ χ for some χ ∈ ∆.
+Since v was arbitrary, Γ ⇒ ∆, φ → ψ is valid.
+Now let’s consider the possible inferences with two premises.
+The last inference is a cut: then π ends in Γ ⇒ ∆, φ φ, Π ⇒ Λ Cut Γ, Π ⇒ ∆, Λ Let v be a valuation.
+By induction hypothesis, the premises are valid, so v satisfies both premises.
+In case (a), in order for v to satisfy the left premise, it must satisfy Γ ⇒ ∆.
+But then it also satisfies the conclusion.
+In case (b), in order for v to satisfy the right premise, it must satisfy Π \ Λ.
+Since Γ ⇒ ∆, φ is valid by induction hypothesis, v ⊨ φ.
+Similarly, since Γ ⇒ ∆, ψ is valid, v ⊨ ψ.
+Then π ends in Γ ⇒ ∆, φ ψ, Π ⇒ Λ →L φ → ψ, Γ, Π ⇒ ∆, Λ Again, consider a valuation v and suppose v doesn’t satisfy Γ, Π ⇒ ∆, Λ.
+Since, Γ ⇒ ∆, φ is valid, we have v ⊨ φ.
+If Γ ⊢ φ then for some finite subset Γ0 ⊆ Γ, there is a derivation of Γ0 ⇒ φ.
+By Theorem 9.25, every valuation v either makes some ψ ∈ Γ0 false or makes φ true.
+If Γ is satisfiable, then it is consistent.
+Then there is a finite Γ0 ⊆ Γ and a derivation of Γ0 ⇒ .
+In other words, for every valuation v, there is χ ∈ Γ0 so that v ⊭ χ, and since Γ0 ⊆ Γ, that χ is also in Γ.
+Thus, no v satisfies Γ, and Γ is not satisfiable.
+Give derivations of the following sequents: 1.
+To include or exclude material relevant to natural deduction as a proof system, use the “prfND” tag.
+10.1 Rules and Derivations Natural deduction systems are meant to closely parallel the informal reasoning used in mathematical proof (hence it is somewhat “natural”).
+Natural deduction proofs begin with assumptions.
+Assumptions are “discharged” by the ¬Intro, →Intro, and ∨Elim inference rules, and the label of the discharged assumption is placed beside the inference for clarity.
+An assumption is any sentence in the topmost position of any branch.
+Derivations in natural deduction are certain trees of sentences, where the topmost sentences are assumptions, and if a sentence stands below one, two, or three other sequents, it must follow correctly by a rule of inference.
+The sentences at the top of the inference are called the premises and the sentence below the conclusion of the inference.
+They introduce a logical operator in the conclusion or remove a logical operator from a premise of the rule.
+To indicate which assumption is discharged by which inference, we also assign labels to both the assumption and the inference.
+DERIVATIONS Rules for ⊥ [¬ φ]n ⊥ ⊥ I φ n ⊥ ⊥ C φ Note that ¬Intro and ⊥C are very similar: The difference is that ¬Intro derives a negated sentence ¬ φ but ⊥C a positive sentence φ.
+E.g., in the →Intro rule, we may discharge any number of assumptions of the form φ in the derivation of the premise ψ, including zero.
+10.3 Derivations We’ve said what an assumption is, and we’ve given the rules of inference.
+Derivations in natural deduction are inductively generated from these: each derivation either is an assumption on its own, or consists of one, two, or three derivations followed by a correct inference.
+A derivation of a sentence φ from assumptions Γ is a finite tree of sentences satisfying the following conditions: 1.
+The topmost sentences of the tree are either in Γ or are discharged by an inference in the tree.
+The bottommost sentence of the tree is φ.
+Every sentence in the tree except the sentence φ at the bottom is a premise of a correct application of an inference rule whose conclusion stands directly below that sentence in the tree.
+We then say that φ is the conclusion of the derivation and Γ its undischarged assumptions.
+If a derivation of φ from Γ exists, we say that φ is derivable from Γ, or in symbols: Γ ⊢ φ.
+If there is a derivation of φ in which every assumption is discharged, we write ⊢ φ.
+Every assumption on its own is a derivation.
+So, e.g., φ by itself is a derivation, and so is ψ by itself.
+We can obtain a new derivation from these by applying, say, the ∧Intro rule, Release : 9f12419 (2026-05-25) 143 CHAPTER 10.
+NATURAL DEDUCTION φ ψ ∧Intro φ∧ψ These rules are meant to be general: we can replace the φ and ψ in it with any sentences, e.g., by χ and θ.
+Then the conclusion would be χ ∧ θ, and so χ θ ∧Intro χ∧θ is a correct derivation.
+Thus, θ χ ∧Intro θ∧χ is also a correct derivation.
+So both of the following would be correct derivations: [ χ ]1 θ ∧Intro χ∧θ 1 →Intro χ → (χ ∧ θ ) [ θ ]1 ∧Intro χ∧θ 1 →Intro θ → (χ ∧ θ ) χ They show, respectively, that θ ⊢ χ → (χ ∧ θ ) and χ ⊢ θ → (χ ∧ θ ).
+In particular, we can apply a rule even if the assumptions are not present in the derivation.
+For instance, the following is legal, even though there is no assumption φ to be discharged: 1 10.4 ψ →Intro φ→ψ Examples of Derivations Example 10.4.
+Let’s give a derivation of the sentence ( φ ∧ ψ) → φ.
+We begin by writing the desired conclusion at the bottom of the derivation.
+( φ ∧ ψ) → φ Next, we need to figure out what kind of inference could result in a sentence of this form.
+The main operator of the conclusion is →, so we’ll try to arrive at the conclusion using the →Intro rule.
+It is best to write down the assumptions involved and label the inference rules as you progress, so it is easy to see whether all assumptions have been discharged at the end of the proof.
+EXAMPLES OF DERIVATIONS [ φ ∧ ψ ]1 1 φ →Intro ( φ ∧ ψ) → φ We now need to fill in the steps from the assumption φ ∧ ψ to φ.
+Since we only have one connective to deal with, ∧, we must use the ∧ elim rule.
+This gives us the following proof: [ φ ∧ ψ ]1 ∧Elim φ 1 →Intro ( φ ∧ ψ) → φ We now have a correct derivation of ( φ ∧ ψ) → φ.
+Now let’s give a derivation of (¬ φ ∨ ψ) → ( φ → ψ).
+(¬ φ ∨ ψ) → ( φ → ψ) To find a logical rule that could give us this conclusion, we look at the logical connectives in the conclusion: ¬, ∨, and →.
+We only care at the moment about the first occurrence of → because it is the main operator of the sentence in the end-sequent, while ¬, ∨ and the second occurrence of → are inside the scope of another connective, so we will take care of those later.
+We will use the assumption ¬ φ ∨ ψ as the leftmost premise of ∨Elim.
+For a valid application of ∨Elim, the other two premises must be identical to the conclusion φ → ψ, but each may be derived in turn from another assumption, namely one of the two disjuncts of ¬ φ ∨ ψ.
+So our derivation will look like this: Release : 9f12419 (2026-05-25) 145 CHAPTER 10.
+NATURAL DEDUCTION [¬ φ]2 2 [ ψ ]2 [¬ φ ∨ ψ]1 1 φ→ψ φ→ψ ∨Elim φ→ψ →Intro (¬ φ ∨ ψ) → ( φ → ψ) In each of the two branches on the right, we want to derive φ → ψ, which is best done using →Intro.
+[¬ φ]2 , [ φ]3 2 [¬ φ ∨ ψ]1 1 [ ψ ]2 , [ φ ]4 ψ ψ →Intro 4 →Intro φ→ψ φ→ψ ∨Elim φ→ψ →Intro (¬ φ ∨ ψ) → ( φ → ψ) 3 For the two missing parts of the derivation, we need derivations of ψ from ¬ φ and φ in the middle, and from φ and ψ on the left.
+¬ φ and φ are the two premises of ¬Elim: [¬ φ]2 [ φ ]3 ⊥ ¬Elim ψ By using ⊥ I , we can obtain ψ as a conclusion and complete the branch.
+Here it’s important to realize that the definition of derivation allows assumptions to be discharged but does not require them to be.
+In other words, if we can derive ψ from one of the assumptions φ and ψ without using the other, that’s ok.
+And to derive ψ from ψ is trivial: ψ by itself is such a derivation, and no inferences are needed.
+EXAMPLES OF DERIVATIONS [¬ φ]2 [ φ ]3 ¬Elim ⊥ ⊥ I ψ [ ψ ]2 3 →Intro →Intro 1 [¬ φ ∨ ψ] φ→ψ φ→ψ 2 ∨Elim φ→ψ 1 →Intro (¬ φ ∨ ψ) → ( φ → ψ) Note that in the finished derivation, the rightmost →Intro inference does not actually discharge any assumptions.
+It is special in that it allows us to discharge an assumption that isn’t a sub-formula of the conclusion of the rule.
+For instance, suppose we want to derive φ ∨ ¬ φ.
+Our usual strategy would be to attempt to derive φ ∨ ¬ φ using ∨Intro.
+But this would require us to derive either φ or ¬ φ from no assumptions, and this can’t be done.
+[¬( φ ∨ ¬ φ)]1 1 ⊥ ⊥C φ ∨ ¬φ Now we’re looking for a derivation of ⊥ from ¬( φ ∨ ¬ φ).
+Just as we’ve defined a number of important semantic notions (validity, entailment, satisfiability), we now define corresponding proof-theoretic notions.
+A sentence φ is a theorem if there is a derivation of φ in natural deduction in which all assumptions are discharged.
+A set of sentences Γ is inconsistent iff Γ ⊢ ⊥.
+The assumption φ by itself is a derivation of φ where every undischarged assumption (i.e., φ) is in Γ.
+Any derivation of φ from Γ is also a derivation of φ from ∆.
+If Γ ⊢ φ, there is a derivation δ0 of φ with all undischarged assumptions in Γ.
+If { φ} ∪ ∆ ⊢ ψ, then there is a derivation δ1 of ψ with all undischarged assumptions in { φ} ∪ ∆.
+If Γ ⊢ φ, then there is a derivation δ of φ from Γ.
+Since any derivation is finite, Γ0 can only contain finitely many sentences.
+So, δ is a derivation of φ from a finite Γ0 ⊆ Γ.
+NATURAL DEDUCTION 10.6 Derivability and Consistency We will now establish a number of properties of the derivability relation.
+Let the derivation of φ from Γ be δ1 and the derivation of ⊥ from Γ ∪ { φ} be δ2 .
+We can then derive: Γ, [ φ]1 Γ δ2 δ1 ⊥ 1 ¬ φ ¬Intro ⊥ φ ¬Elim In the new derivation, the assumption φ is discharged, so it is a derivation from Γ.
+First suppose Γ ⊢ φ, i.e., there is a derivation δ0 of φ from undischarged assumptions Γ.
+We obtain a derivation of ⊥ from Γ ∪ {¬ φ} as follows: Γ δ0 ¬φ φ ⊥ ¬Elim Now assume Γ ∪ {¬ φ} is inconsistent, and let δ1 be the corresponding derivation of ⊥ from undischarged assumptions in Γ ∪ {¬ φ}.
+We obtain a derivation of φ from Γ alone by using ⊥C : Γ, [¬ φ]1 δ1 1 ⊥ ⊥ C φ Proposition 10.17.
+Then there is a derivation δ of φ from Γ.
+DERIVABILITY AND THE PROPOSITIONAL CONNECTIVES Γ δ ¬φ φ ⊥ ¬Elim Since ¬ φ ∈ Γ, all undischarged assumptions are in Γ, this shows that Γ ⊢ ⊥.
+There are derivations δ1 and δ2 of ⊥ from Γ ∪ { φ} and ⊥ from Γ ∪ {¬ φ}, respectively.
+We can then derive 2 Γ, [¬ φ]2 Γ, [ φ]1 δ2 δ1 ⊥ ¬¬ φ ¬Intro ⊥ 1 ⊥ ¬ φ ¬Intro ¬Elim Since the assumptions φ and ¬ φ are discharged, this is a derivation of ⊥ from Γ alone.
+10.7 Derivability and the Propositional Connectives We establish that the derivability relation ⊢ of natural deduction is strong enough to establish some basic facts involving the propositional connectives, such as that φ ∧ ψ ⊢ φ and φ, φ → ψ ⊢ ψ (modus ponens).
+We can derive both φ∧ψ ∧Elim φ φ∧ψ ∧Elim ψ 2.
+We can derive: φ ψ ∧Intro φ∧ψ Proposition 10.20.
+Consider the following derivation: [ φ ]1 ¬φ 1 ⊥ φ∨ψ ¬Elim [ ψ ]1 ¬ψ ⊥ ⊥ ¬Elim ∨Elim This is a derivation of ⊥ from undischarged assumptions φ ∨ ψ, ¬ φ, and ¬ψ.
+We can derive both ψ ∨Intro φ∨ψ φ ∨Intro φ∨ψ 1.
+This is shown by the following two derivations: ¬φ 1 [ φ ]1 ¬Elim ⊥ ⊥ I ψ →Intro φ→ψ ψ →Intro φ→ψ Note that →Intro may, but does not have to, discharge the assumption φ.
+10.8 Soundness A derivation system, such as natural deduction, is sound if it cannot derive things that do not actually follow.
+every derivable sentence is a tautology; 152 Release : 9f12419 (2026-05-25) 10.8.
+These are important properties of a derivation system.
+If φ is derivable from the undischarged assumptions Γ, then Γ ⊨ φ.
+We proceed by induction on the number of inferences in δ.
+For the induction basis we show the claim if the number of inferences is 0.
+In this case, δ consists only of a single sentence φ, i.e., an assumption.
+That assumption is undischarged, since assumptions can only be discharged by inferences, and there are no inferences.
+So, any valuation v that satisfies all of the undischarged assumptions of the proof also satisfies φ.
+The premise(s) of the lowermost inference are derived using sub-derivations, each of which contains fewer than n inferences.
+We assume the induction hypothesis: The premises of the lowermost inference follow from the undischarged assumptions of the sub-derivations ending in those premises.
+We have to show that the conclusion φ follows from the undischarged assumptions of the entire proof.
+We distinguish cases according to the type of the lowermost inference.
+Suppose that the last inference is ¬Intro: The derivation has the form Γ, [ φ]n δ1 n ⊥ ¬ φ ¬Intro By inductive hypothesis, ⊥ follows from the undischarged assumptions Γ ∪ { φ} of δ1 .
+The last inference is ∧Elim: There are two variants: φ or ψ may be inferred from the premise φ ∧ ψ.
+The derivation δ looks like this: Γ δ1 φ∧ψ ∧Elim φ By inductive hypothesis, φ ∧ ψ follows from the undischarged assumptions Γ of δ1 .
+The last inference is ∨Intro: There are two variants: φ ∨ ψ may be inferred from the premise φ or the premise ψ.
+The derivation has the form Γ δ1 φ ∨Intro φ∨ψ By inductive hypothesis, φ follows from the undischarged assumptions Γ of δ1 .
+The last inference is →Intro: φ → ψ is inferred from a subproof with assumption φ and conclusion ψ, i.e., Γ, [ φ]n δ1 n ψ →Intro φ→ψ By inductive hypothesis, ψ follows from the undischarged assumptions of δ1 , i.e., Γ ∪ { φ} ⊨ ψ.
+The undischarged assumptions of δ are just Γ, since φ is discharged at the last inference.
+SOUNDNESS valuation v, v ⊨ Γ but v ⊭ φ → ψ.
+But by hypothesis, ψ is a consequence of Γ ∪ { φ}, i.e., v ⊨ ψ, which is a contradiction.
+The last inference is ⊥ I : Here, δ ends in Γ δ1 ⊥ ⊥ I φ By induction hypothesis, Γ ⊨ ⊥.
+Now let’s consider the possible inferences with several premises: ∨Elim, ∧Intro, and →Elim.
+φ ∧ ψ is inferred from the premises φ and ψ and δ has the form Γ2 Γ1 δ2 δ1 φ ψ ∧Intro φ∧ψ By induction hypothesis, φ follows from the undischarged assumptions Γ1 of δ1 and ψ follows from the undischarged assumptions Γ2 of δ2 .
+Consider a valuation v with v ⊨ Γ1 ∪ Γ2 .
+ψ is inferred from the premises φ → ψ and φ.
+The derivation δ looks like this: Γ1 Γ2 δ1 φ→ψ ψ Release : 9f12419 (2026-05-25) δ2 φ →Elim 155 CHAPTER 10.
+Then Γ ⊢ ⊥, i.e., there is a derivation of ⊥ from undischarged assumptions in Γ.
+By Theorem 10.22, any valuation v that satisfies Γ must satisfy ⊥.
+Since v ⊭ ⊥ for every valuation v, no v can satisfy Γ, i.e., Γ is not satisfiable.
+Give derivations that show the following: 1.
+11.1 Rules and Tableaux A tableau is a systematic survey of the possible ways a sentence can be true or false in a structure.
+The building blocks of a tableau are signed formulas: sentences plus a truth value “sign,” either T or F.
+These signed formulas are arranged in a (downward growing) tree.
+A signed formula is a pair consisting of a truth value and a sentence, i.e., either: T φ or F φ.
+Each signed formula in the tree is either an assumption (which are listed at the very top of the tree), or it is obtained from a signed formula above it by one of a number of rules of inference.
+There are two rules for each possible main operator of the preceding formula, one for the case where the sign is T, and one for the case where the sign is F.
+Some rules allow the tree to branch, and some only add signed formulas to the branch.
+A rule may be (and often must be) applied not to the immediately preceding signed formula, but to any signed formula in the branch from the root to the place the rule is applied.
+TABLEAUX The Cut Rule Tφ | Fφ Cut The Cut rule is not applied “to” a previous signed formula; rather, it allows every branch in a tableau to be split in two, one branch containing T φ, the other F φ.
+It is not necessary—any set of signed formulas with a closed tableau has one not using Cut—but it allows us to combine tableaux in a convenient way.
+11.3 Tableaux We’ve said what an assumption is, and we’ve given the rules of inference.
+Tableaux are inductively generated from these: each tableau either is a single branch consisting of one or more assumptions, or it results from a tableau by applying one of the rules of inference on a branch.
+, Snφn (where each Si is either T or F) is a finite tree of signed formulas satisfying the following conditions: 1.
+The n topmost signed formulas of the tree are Si φi , one below the other.
+Every signed formula in the tree that is not one of the assumptions results from a correct application of an inference rule to a signed formula in the branch above it.
+(Obviously, it is closed only if the assumptions already contain a pair of signed formulas T φ and F φ.) From a tableau (open or closed) we can obtain a new, larger one by applying one of the rules of inference to a signed formula φ in it.
+The rule will append one or more signed formulas to the end of any branch containing the occurrence of φ to which we apply the rule.
+T φ ∧ ¬φ Tφ T¬ φ Assumption ∧T 1 ∧T 1 When we write down tableaux, we record the rules we’ve applied on the right (e.g., ∧T1 means that the signed formula on that line is the result of applying the ∧T rule to the signed formula on line 1).
+This new tableau now contains additional signed formulas, but to only one (T ¬ φ) can we apply a rule (in this case, the ¬T rule).
+Let’s find a closed tableau for the sentence ( φ ∧ ψ) → φ.
+F ( φ ∧ ψ) → φ Assumption There is only one assumption, so only one signed formula to which we can apply a rule.
+(For every signed formula, there is always at most one rule that can be applied: it’s the rule for the corresponding sign and main operator of the sentence.) In this case, this means, we must apply →F.
+F ( φ ∧ ψ) → φ ✓ Tφ ∧ ψ Fφ Assumption →F 1 →F 1 To keep track of which signed formulas we have applied their corresponding rules to, we write a checkmark next to the sentence.
+Once a signed formula has had the corresponding rule applied in every open branch, we will not have to return to it and apply the rule again.
+(Note that checkmarks are only a convenience for constructing tableaux and are not officially part of the syntax of tableaux.) There is one new signed formula to which we can apply a rule: the T φ ∧ ψ on line 2.
+F (¬ φ ∨ ψ) → ( φ → ψ) Assumption The one signed formula in this tableau has main operator → and sign F, so we apply the →F rule to it to obtain: 1.
+It actually doesn’t matter which order we pick, as long as each signed formula has its corresponding rule applied in every branch.
+The ∨T rule allows the tableau to branch, and the two conclusions of the rule will be the new signed formulas added to the two new branches.
+Recall that we write a checkmark next to a signed formula only if we have applied the corresponding rule in every open branch.
+So it’s a good idea to apply a rule at the end of every branch that contains the signed formula the rule applies to.
+That way we won’t have to return to that signed formula lower down in the various branches.
+We can give tableaux for any number of signed formulas as assumptions.
+PROOF-THEORETIC NOTIONS T φ ∨ (ψ ∧ χ) ✓ F ( φ ∨ ψ) ∧ ( φ ∨ χ) ✓ 1.
+Tφ ⊗ Tψ ∧ χ ✓ Tψ Tχ ⊗ Fφ ∨ χ ✓ Fφ Fχ Tφ ⊗ Tψ ∧ χ ✓ Tψ Tχ ⊗ Assumption Assumption ∧F 2 ∨F 3 ∨F 3 ∨T 1 ∧T 6 ∧T 6 Proof-Theoretic Notions This section collects the definitions of the provability relation and consistency for tableaux.
+A sentence φ is a theorem if there is a closed tableau for F φ.
+A sentence φ is derivable from a set of sentences Γ, Γ ⊢ φ iff there is a finite set {ψ1 , .
+DERIVABILITY AND CONSISTENCY Apply the Cut rule on φ.
+, Tθm } are available, so we can also complete the other side to obtain a closed tableau.
+11.6 Derivability and Consistency We will now establish a number of properties of the derivability relation.
+On the other hand, if there is a closed tableau for the latter, we can turn it into a closed tableau of the former by removing every formula that results from ¬T applied to the first assumption T ¬ φ as well as that assumption, and adding the assumption F φ.
+For if a branch was closed before because it contained the conclusion of ¬T applied to T ¬ φ, i.e., F φ, the corresponding branch in the new tableau is also closed.
+Replace the assumption F φ by T ¬ φ, and insert the conclusion of ¬T applied to F φ after the assumptions.
+Any sentence in the tableau justified by appeal to line 1 in the old tableau is now justified by appeal to line n + 1.
+DERIVABILITY AND THE PROPOSITIONAL CONNECTIVES Proof.
+The conclusion of ¬T to T ¬ φ is F φ, which is nevertheless available, as it is the conclusion of the Cut rule on the right side of the combined tableau.
+Now the corresponding branch in the combined tableau also closes, because it contains the right-hand conclusion of the Cut rule, F φ.
+11.7 Derivability and the Propositional Connectives We establish that the derivability relation ⊢ of tableaux is strong enough to establish some basic facts involving the propositional connectives, such as that φ ∧ ψ ⊢ φ and φ, φ → ψ ⊢ ψ (modus ponens).
+Fφ → ψ Tψ Tφ Fψ ⊗ Assumption Assumption →F 1 →F 1 Soundness A derivation system, such as tableaux, is sound if it cannot derive things that do not actually hold.
+We will first define what it means for a signed formula to be satisfied in a structure, and then show that if a tableau is closed, no structure satisfies all its assumptions.
+A valuation v satisfies a signed formula T φ iff v ⊨ φ, and it satisfies F φ iff v ⊭ φ.
+v satisfies a set of signed formulas Γ iff it satisfies every S φ ∈ Γ.
+Γ is satisfiable if there is a valuation that satisfies it, and unsatisfiable otherwise.
+Let’s call a branch of a tableau satisfiable iff the set of signed formulas on it is satisfiable, and let’s call a tableau satisfiable if it contains at least one satisfiable branch.
+We show the following: Extending a satisfiable tableau by one of the rules of inference always results in a satisfiable tableau.
+This will prove the theorem: any closed tableau results by applying rules of inference to the tableau consisting only of assumptions from Γ.
+So if Γ were satisfiable, any tableau for it would be satisfiable.
+A closed tableau, however, is clearly not satisfiable: every branch contains both T φ and F φ, and no structure can both satisfy and not satisfy φ.
+Suppose we have a satisfiable tableau, i.e., a tableau with at least one satisfiable branch.
+Applying a rule of inference either adds signed formulas to a branch, or splits a branch in two.
+If the tableau has a satisfiable branch which is not extended by the rule application in question, it remains a satisfiable branch in the extended tableau, so the extended tableau is satisfiable.
+So we only have to consider the case where a rule is applied to a satisfiable branch.
+Let Γ be the set of signed formulas on that branch, and let S φ ∈ Γ be the signed formula to which the rule is applied.
+If the rule does not result in a split branch, we have to show that the extended branch, i.e., Γ together with the conclusions of the rule, is still satisfiable.
+If the rule results in a split branch, we have to show that at least one of the two resulting branches is satisfiable.
+SOUNDNESS First, we consider the possible inferences that do not result in a split branch.
+Then the extended branch contains the signed formulas Γ ∪ {F ψ}.
+The branch is expanded by applying ∧T to Tψ ∧ χ ∈ Γ, which results in two new signed formulas on the branch: Tψ and Tχ.
+The branch is expanded by applying →F to F ψ → χ ∈ Γ: This results in two new signed formulas on the branch: Tψ and F χ.
+Now let’s consider the possible inferences that result in a split branch.
+In the former case, v satisfies F ψ, i.e., v satisfies the formulas on the left branch.
+In the latter, v satisfies F χ, i.e., v satisfies the formulas on the right branch.
+By Theorem 11.23, every valuation v either makes some ψi false or makes φ true.
+By Theorem 11.23, there is no v such that v ⊨ ψi for all i = 1, .
+If the FOL tag is true, we produce a version with quantifiers, otherwise without.
+12.1 Rules and Derivations Axiomatic derivations are perhaps the simplest derivation system for logic.
+A derivation is just a sequence of formulas.
+To count as a derivation, every formula in the sequence must either be an instance of an axiom, or must follow from one or more formulas that precede it in the sequence by a rule of inference.
+If Γ is a set of formulas of L then a derivation from Γ is a finite sequence φ1 , .
+, φn of formulas where for each i ≤ n one of the following holds: 1.
+φi follows from some φ j (and φk ) with j < i (and k < i) by a rule of inference.
+What counts as a correct derivation depends on which inference rules we allow (and of course what we take to be axioms).
+And an inference rule is an if-then statement that tells us that, under certain conditions, a step Ai in a derivation is a correct inference step.
+RULES AND DERIVATIONS Definition 12.2 (Rule of inference).
+A rule of inference gives a sufficient condition for what counts as a correct inference step in a derivation from Γ.
+For instance, since any one-element sequence φ with φ ∈ Γ trivially counts as a derivation, the following might be a very simple rule of inference: If φ ∈ Γ, then φ is always a correct inference step in any derivation from Γ.
+Similarly, if φ is one of the axioms, then φ by itself is a derivation, and so this is also a rule of inference: If φ is an axiom, then φ is a correct inference step.
+It gets more interesting if the rule of inference appeals to formulas that appear before the step considered.
+The following rule is called modus ponens: If ψ → φ and ψ occur higher up in the derivation, then φ is a correct inference step.
+If this is the only rule of inference, then our definition of derivation above amounts to this: φ1 , .
+, φn is a derivation iff for each i ≤ n one of the following holds: 1.
+The last clause says that φi follows from φ j (ψ → φi ) and φk (ψ) by modus ponens.
+If we can go from 1 to n, and each time we find a formula φi that is either in Γ, an axiom, or which a rule of inference tells us that it is a correct inference step, then the entire sequence counts as a correct derivation.
+A formula φ is derivable from Γ, written Γ ⊢ φ, if there is a derivation from Γ ending in φ.
+A formula φ is a theorem if there is a derivation of φ from the empty set.
+AXIOMATIC DERIVATIONS 12.2 Axioms and Rules for the Propositional Connectives Definition 12.5 (Axioms).
+If ψ and ψ → φ already occur in a derivation, then φ is a correct inference step.
+We’ll abbreviate the rule modus ponens as “MP.” 12.3 Examples of Derivations Example 12.7.
+Clearly, this is not an instance of any of our axioms, so we have to use the MP rule to derive it.
+So our derivation is: 178 Release : 9f12419 (2026-05-25) 12.3.
+Let’s try to find a derivation of θ → θ.
+It is not an instance of an axiom, so we have to use MP to derive it.
+(12.7) is an axiom of the form φ → ψ to which we could apply MP.
+To be useful, of course, the ψ which MP would justify as a correct step in this case would have to be θ → θ, since this is what we want to derive.
+(12.7): θ → (θ → θ ) In order to apply MP, we would also need to justify the corresponding second premise, namely φ.
+But in our case, that would be θ, and we won’t be able to derive θ by itself.
+(12.8) where φ → χ is θ → θ, the formula we are aiming for.
+How should we pick ψ so that both φ → (ψ → χ) and φ → ψ, i.e., in our case θ → (ψ → θ ) and θ → ψ, are also derivable?
+Sometimes we want to show that there is a derivation of some formula from some other formulas Γ.
+For instance, let’s show that we can derive φ → χ from Γ = { φ → ψ, ψ → χ}.
+(12.8) 4, 5, MP 1, 6, MP The lines labelled “H YP” (for “hypothesis”) indicate that the formula on that line is an element of Γ.
+If Γ ⊢ φ → ψ and Γ ⊢ ψ → χ, then Γ ⊢ φ → χ Proof.
+Then there is a derivation of φ → ψ from Γ; and a derivation of ψ → χ from Γ as well.
+Combine these into a single derivation by concatenating them.
+Now add lines 3–7 of the derivation in the preceding example.
+This is a derivation of φ → χ—which is the last line of the new derivation—from Γ.
+Note that the justifications of lines 4 and 7 remain valid if the reference to line number 1 is replaced by reference to the last line of the derivation of φ → ψ, and reference to line number 2 by reference to the last line of the derivation of ψ → χ.
+12.4 Proof-Theoretic Notions Just as we’ve defined a number of important semantic notions (tautology, entailment, satisfiability), we now define corresponding proof-theoretic notions.
+A set Γ of formulas is consistent if and only if Γ ⊬ ⊥; it is inconsistent otherwise.
+The formula φ by itself is a derivation of φ from Γ.
+Some of the steps in that derivation will be correct because of a rule which refers to a prior line ψi = φ.
+By hypothesis, there is a derivation of φ from Γ, i.e., a derivation φ1 , .
+, φk = φ where every φi is an axiom, an element of Γ, or correct by a rule of inference.
+This is a correct derivation of ψ from Γ ∪ ∆ since every Bi = φ is now justified by the same rule which justifies φk = φ.
+If Γ ⊢ φ, then there is a finite sequence of formulas φ1 , .
+, φn so that φ ≡ φn and each φi is either a logical axiom, an element of Γ or follows from previous formulas by modus ponens.
+Then the derivation is likewise a derivation from Γ0 , and so Γ0 ⊢ φ.
+12.5 The Deduction Theorem As we’ve seen, giving derivations in an axiomatic system is cumbersome, and derivations may be hard to find.
+Rather than actually write out long lists of formulas, it is generally easier to argue that such derivations exist, by making use of a few simple results.
+Here’s another simple result, a “meta”-version of modus ponens: Release : 9f12419 (2026-05-25) 181 CHAPTER 12.
+AXIOMATIC DERIVATIONS Proposition 12.19.
+The most important result we’ll use in this context is the deduction theorem: Theorem 12.20 (Deduction Theorem).
+For the “only if” direction, we proceed by induction on the length of the derivation of ψ from Γ ∪ { φ}.
+For the induction basis, we prove the claim for every derivation of length 1.
+A derivation of ψ from Γ ∪ { φ} of length 1 consists of ψ by itself; and if it is correct ψ is either ∈ Γ ∪ { φ} or is an axiom.
+If ψ ∈ { φ} then Γ ⊢ φ → ψ because the last sentence φ → ψ is the same as φ → φ, and we have derived that in Example 12.8.
+For the inductive step, suppose a derivation of ψ from Γ ∪ { φ} ends with a step ψ which is justified by modus ponens.
+(12.8) were chosen precisely so that the Deduction Theorem would hold.
+The following are some useful facts about derivability, which we leave as exercises.
+DERIVABILITY AND CONSISTENCY Proposition 12.21.
+{¬¬ φ} ⊢ φ (Double Negation Elimination); 5.
+If Γ ⊢ ¬¬ φ then Γ ⊢ φ; 12.6 Derivability and Consistency We will now establish a number of properties of the derivability relation.
+(12.3) by two applications of modus ponens.
+So by the deduction theorem, we have {¬ φ} ⊢ φ → ⊥ and {¬ψ} ⊢ ψ → ⊥.
+By the deduction theorem, { φ ∨ ψ, ¬ φ, ¬ψ} ⊢ ⊥.
+(12.7) and the deduction theorem, respectively.
+SOUNDNESS 12.8 Soundness A derivation system, such as axiomatic deduction, is sound if it cannot derive things that do not actually hold.
+if φ is derivable from some others Γ, it is also a consequence of them; 3.
+if a set of formulas Γ is inconsistent, it is unsatisfiable.
+If φ is an axiom, then v ⊨ φ for each valuation v.
+Do truth tables for each axiom to verify that they are tautologies.
+By induction on the length of the derivation of φ from Γ.
+If there are no steps justified by inferences, then all formulas in the derivation are either instances of axioms or are in Γ.
+By the previous proposition, all the axioms are tautologies, and hence if φ is an axiom then Γ ⊨ φ.
+Then Γ ⊢ ⊥, i.e., there is a derivation of ⊥ from Γ.
+By Theorem 12.30, any valuation v that satisfies Γ must satisfy ⊥.
+AXIOMATIC DERIVATIONS Problems Problem 12.1.
+Show that the following hold by exhibiting derivations from the axioms: 1.
+Prove Proposition 12.25 186 Release : 9f12419 (2026-05-25) Chapter 13 The Completeness Theorem 13.1 Introduction The completeness theorem is one of the most fundamental results about logic.
+It comes in two formulations, the equivalence of which we’ll prove.
+In its first formulation it says something fundamental about the relationship between semantic consequence and our derivation system: if a sentence φ follows from some sentences Γ, then there is also a derivation that establishes Γ ⊢ φ.
+Thus, the derivation system is as strong as it can possibly be without proving things that don’t actually follow.
+In its second formulation, it can be stated as a model existence result: every consistent set of sentences is satisfiable.
+Consistency is a proof-theoretic notion: it says that our derivation system is unable to produce certain derivations.
+But who’s to say that just because there are no derivations of a certain sort from Γ, it’s guaranteed that there is valuation v with v ⊨ Γ?
+Before the completeness theorem was first proved—in fact before we had the derivation systems we now do—the great German mathematician David Hilbert held the view that consistency of mathematical theories guarantees the existence of the objects they are about.
+He put it as follows in a letter to Gottlob Frege: If the arbitrarily given axioms do not contradict one another with all their consequences, then they are true and the things defined by the axioms exist.
+This is for me the criterion of truth and existence.
+The second formulation of the completeness theorem shows that Hilbert was right in at least the sense that if the axioms are consistent, then some valuation exists that makes them all true.
+These aren’t the only reasons the completeness theorem—or rather, its proof—is important.
+It has a number of important consequences, some of which we’ll discuss separately.
+For instance, since any derivation that shows Γ ⊢ φ is finite and so can only use finitely many of the sentences in Γ, it follows by the completeness theorem that if φ is a consequence of Γ, it is already 187 CHAPTER 13.
+THE COMPLETENESS THEOREM a consequence of a finite subset of Γ.
+Although the compactness theorem follows from the completeness theorem via the detour through derivations, it is also possible to use the the proof of the completeness theorem to establish it directly.
+For what the proof does is take a set of sentences with a certain property—consistency—and constructs a structure out of this set that has certain properties (in this case, that it satisfies the set).
+Almost the very same construction can be used to directly establish compactness, by starting from “finitely satisfiable” sets of sentences instead of consistent ones.
+13.2 Outline of the Proof The proof of the completeness theorem is a bit complex, and upon first reading it, it is easy to get lost.
+The first step is a shift of perspective, that allows us to see a route to a proof.
+When completeness is thought of as “whenever Γ ⊨ φ then Γ ⊢ φ,” it may be hard to even come up with an idea: for to show that Γ ⊢ φ we have to find a derivation, and it does not look like the hypothesis that Γ ⊨ φ helps us for this in any way.
+For some proof systems it is possible to directly construct a derivation, but we will take a slightly different approach.
+The shift in perspective required is this: completeness can also be formulated as: “if Γ is consistent, it is satisfiable.” Perhaps we can use the information in Γ together with the hypothesis that it is consistent to construct a valuation that satisfies every formula in Γ.
+After all, we know what kind of valuation we are looking for: one that is as Γ describes it!
+All we have to do is come up with a valuation v such that v ⊨ p for all p ∈ Γ.
+Now suppose Γ contains some formula ¬ψ, with ψ atomic.
+What if Γ contains complex, non-atomic formulas?
+COMPLETE CONSISTENT SETS OF SENTENCES set of all formulas so added Γ ∗ .
+Then our construction above would provide us with a valuation v for which we could prove, by induction, that it satisfies all sentences in Γ ∗ , and hence also all sentence in Γ since Γ ⊆ Γ ∗ .
+A set of sentences for which (b) holds is called complete.
+So our task will be to extend the consistent set Γ to a consistent and complete set Γ ∗ .
+First we investigate the properties of complete consistent sets, in particular we prove that a complete consistent set contains φ ∧ ψ iff it contains both φ and ψ, φ ∨ ψ iff it contains at least one of them, etc.
+We’ll then take the consistent set Γ and show that it can be extended to a consistent and complete set Γ ∗ (Lemma 13.3).
+This set Γ ∗ is what we’ll use to define our valuation v( Γ ∗ ).
+The valuation is determined by the propositional variables in Γ ∗ (Definition 13.4).
+We’ll use the properties of complete consistent sets to show that indeed v( Γ ∗ ) ⊨ φ iff φ ∈ Γ ∗ (Lemma 13.5), and thus in particular, v( Γ ∗ ) ⊨ Γ.
+13.3 Complete Consistent Sets of Sentences Definition 13.1 (Complete set).
+A set Γ of sentences is complete iff for any sentence φ, either φ ∈ Γ or ¬ φ ∈ Γ.
+Complete sets of sentences leave no questions unanswered.
+For any sentence φ, Γ “says” if φ is true or false.
+The importance of complete sets extends beyond the proof of the completeness theorem.
+A theory which is complete and axiomatizable, for instance, is always decidable.
+Complete consistent sets are important in the completeness proof since we can guarantee that every consistent set of sentences Γ is contained in a complete consistent set Γ ∗ .
+A complete consistent set contains, for each sentence φ, either φ or its negation ¬ φ, but not both.
+This is true in particular for propositional variables, so from a complete consistent set, we can construct a valuation where the truth value assigned to propositional variables is defined according to which propositional variables are in Γ ∗ .
+This valuation can then be shown to make all sentences in Γ ∗ (and hence also all those in Γ) true.
+The proof of this latter fact requires that ¬ φ ∈ Γ ∗ iff φ ∈ / Γ ∗ , ( φ ∨ ψ) ∈ Γ ∗ iff ∗ ∗ φ ∈ Γ or ψ ∈ Γ , etc.
+Let us suppose for all of the following that Γ is complete and consistent.
+Since Γ is complete, ¬ φ ∈ Γ and ¬ψ ∈ Γ.
+By Propositions 9.22, 10.20, 11.20 and 12.27, item (1), Γ is inconsistent, a contradiction.
+13.4 Lindenbaum’s Lemma We now prove a lemma that shows that any consistent set of sentences is contained in some set of sentences which is not just consistent, but also complete.
+The proof works by adding one sentence at a time, guaranteeing at each step that the set remains consistent.
+The union of all stages in that construction then contains either φ or its negation ¬ φ and is thus complete.
+Every consistent set Γ in a language L can be extended to a complete and consistent set Γ ∗ .
+be an enumeration of all the sentences of L.
+Every sentence of Frm(L) appears on the list used to define Γ ∗ .
+13.5 Construction of a Model We are now ready to define a valuation that makes all φ ∈ Γ true.
+To do this, we first apply Lindenbaum’s Lemma: we get a complete consistent Γ ∗ ⊇ Γ.
+Suppose Γ ∗ is a complete consistent set of formulas.
+Then we let ( T if p ∈ Γ ∗ ∗ v( Γ )( p) = F if p ∈ / Γ∗ Lemma 13.5 (Truth Lemma).
+Since Γ ∗ is consistent and ∗ ∗ complete, ψ ∈ / Γ iff ¬ψ ∈ Γ .
+13.6 The Completeness Theorem Let’s combine our results: we arrive at the completeness theorem.
+By Lemma 13.3, there is a Γ ∗ ⊇ Γ which is consistent and complete.
+From this it follows in particular that for all φ ∈ Γ, v( Γ ∗ ) ⊨ φ, so Γ is satisfiable.
+Corollary 13.7 (Completeness Theorem, Second Version).
+For all Γ and sentences φ: if Γ ⊨ φ then Γ ⊢ φ.
+Note that the Γ’s in Corollary 13.7 and Theorem 13.6 are universally quantified.
+To make sure we do not confuse ourselves, let us restate Theorem 13.6 using a different variable: for any set of sentences ∆, if ∆ is consistent, it is satisfiable.
+By contraposition, if ∆ is not satisfiable, then ∆ is inconsistent.
+Taking Γ ∪ {¬ φ} as our ∆, the previous version of Theorem 13.6 gives us that Γ ∪ {¬ φ} is inconsistent.
+13.7 The Compactness Theorem One important consequence of the completeness theorem is the compactness theorem.
+The compactness theorem states that if each finite subset of a set of sentences is satisfiable, the entire set is satisfiable—even if the set itself is infinite.
+There is nothing that seems to rule out, at first glance at least, the possibility of there being infinite sets of sentences which are contradictory, but the contradiction only arises, so to speak, from the infinite number.
+The compactness theorem says that such a scenario can be ruled out: there are no unsatisfiable infinite sets of sentences each finite subset of which is satisfiable.
+Like the completeness theorem, it has a version related to entailment: if an infinite set of sentences entails something, already a finite subset does.
+A set Γ of formulas is finitely satisfiable iff every finite Γ0 ⊆ Γ is satisfiable.
+A DIRECT PROOF OF THE COMPACTNESS THEOREM Theorem 13.9 (Compactness Theorem).
+The following hold for any sentences Γ and φ: 1.
+Γ is satisfiable iff it is finitely satisfiable.
+If Γ is satisfiable, then there is a valuation v such that v ⊨ φ for all φ ∈ Γ.
+Of course, this v also satisfies every finite subset of Γ, so Γ is finitely satisfiable.
+Now suppose that Γ is finitely satisfiable.
+Then every finite subset Γ0 ⊆ Γ is satisfiable.
+By soundness (Corollaries 9.28, 10.24, 11.26 and 12.32), every finite subset is consistent.
+By completeness (Theorem 13.6), since Γ is consistent, it is satisfiable.
+13.8 A Direct Proof of the Compactness Theorem We can prove the Compactness Theorem directly, without appealing to the Completeness Theorem, using the same ideas as in the proof of the completeness theorem.
+In the proof of the Completeness Theorem we started with a consistent set Γ of sentences, expanded it to a consistent and complete set Γ ∗ of sentences, and then showed that in the valuation v( Γ ∗ ) constructed from Γ ∗ , all sentences of Γ are true, so Γ is satisfiable.
+We can use the same method to show that a finitely satisfiable set of sentences is satisfiable.
+We just have to prove the corresponding versions of the results leading to the truth lemma where we replace “consistent” with “finitely satisfiable.” Proposition 13.10.
+Suppose Γ is complete and finitely satisfiable.
+Every finitely satisfiable set Γ can be extended to a complete and finitely satisfiable set Γ ∗ .
+Γ is satisfiable if and only if it is finitely satisfiable.
+THE COMPLETENESS THEOREM Now suppose that Γ is finitely satisfiable.
+By Lemma 13.11, Γ can be extended to a complete and finitely satisfiable set Γ ∗ .
+Construct the valuation v( Γ ∗ ) as in Definition 13.4.
+The proof of the Truth Lemma (Lemma 13.5) goes through if we replace references to Proposition 13.2.
+Use Corollary 13.7 to prove Theorem 13.6, thus showing that the two formulations of the completeness theorem are equivalent.
+In order for a derivation system to be complete, its rules must be strong enough to prove every unsatisfiable set inconsistent.
+Which of the rules of derivation were necessary to prove completeness?
+Are any of these rules not used anywhere in the proof?
+In order to answer these questions, make a list or diagram that shows which of the rules of derivation were used in which results that lead up to the proof of Theorem 13.6.
+Be sure to note any tacit uses of rules in these proofs.
+(Hint: the crucial step is to show that if Γn is finitely satisfiable, then either Γn ∪ { φn } or Γn ∪ {¬ φn } is finitely satisfiable.) Problem 13.8.
+Write out the complete proof of the Truth Lemma (Lemma 13.5) in the version required for the proof of Theorem 13.12.
+194 Release : 9f12419 (2026-05-25) Part III First-order Logic 195 This part covers the metatheory of first-order logic through completeness.
+The source files will exclude the material on quantifiers (and replace “structure” with “valuation”, M with v, etc.) if the “FOL” tag is false.
+It is planned, however, to make it possible to let this part take into account the material on propositional logic (and exclude the material already covered, as well as shorten proofs with references to the respective places in the propositional part).
+There are different kinds of permitted expressions: terms, formulas, and sentences.
+We are mainly interested in sentences of first-order logic: they provide us with a formal analogue of sentences of English, and about them we can ask the questions a logician typically is interested in.
+These questions are primarily questions about the “meaning” of sentences of first-order logic.
+But we haven’t been told yet what a “case” is—that is the job of semantics.
+The semantics of first-order logic provides a mathematically precise model of the philosopher’s intuitive idea of “case,” and also—and this is important—of what it is for a sentence φ to be true in a case.
+INTRODUCTION TO FIRST-ORDER LOGIC M ⊨ φ) for sentences φ and structures M.
+Another topic you probably remember from your first introduction to formal logic is that there are derivations.
+If you have taken a first formal logic course, your instructor will have made you practice finding such derivations, perhaps even a derivation that shows that the above entailment holds.
+There are many different ways to give derivations: you may have done something called “natural deduction” or “truth trees,” but there are many others.
+On the face of it, derivation systems have nothing to do with semantics: giving a formal derivation merely involves arranging symbols in certain rule-governed ways; they don’t mention “cases” or “true in” at all.
+The connection between derivation systems and semantics has to be established by a meta-logical investigation.
+What’s needed is a mathematical proof, e.g., that a formal derivation of ∃ x ψ( x ) from premises ∀ x ( φ( x ) → ψ( x )) and ∃ x φ( x ) is possible, if, and only if, ∀ x ( φ( x ) → ψ( x )) and ∃ x φ( x ) together entail ∃ x ψ( x ).
+Before this can be done, however, a lot of painstaking work has to be carried out to get the definitions of syntax and semantics correct.
+14.2 Syntax We first must make precise what strings of symbols count as sentences of firstorder logic.
+E.g, we might use a as a constant symbol to pick out a single thing, and then say something about it using the sentence P (a ).
+If you have meanings for “a” and “P ” in mind, you can read P (a ) as a sentence of English (and you probably have done so when you first learned formal logic).
+Once you have such simple sentences of first-order logic, you can build more complex ones using the second part 198 Release : 9f12419 (2026-05-25) 14.3.
+FORMULAS of the vocabulary: the logical symbols (connectives and quantifiers).
+In order to provide the precise definitions of semantics and the rules of our derivation systems required for rigorous meta-logical study, we first of all have to give a precise definition of what counts as a sentence of first-order logic.
+The basic idea is easy enough to understand: there are some simple sentences we can form from just predicate symbols and constant symbols, such as P (a ).
+And then from these we form more complex ones using the connectives and quantifiers.
+But what exactly are the rules by which we are allowed to form more complex sentences?
+These must be specified, otherwise we have not defined “sentence of first-order logic” precisely enough.
+The first one is to get the right strings to count as sentences.
+The second one is to do this in such a way that we can give mathematical proofs about all sentences.
+Finally, we’ll have to also give precise definitions of some rudimentary operations with sentences, such as “replace every x in φ by b.” The trouble is that the quantifiers and variables we have in first-order logic make it not entirely obvious how this should be done.
+E.g., should ∃x P (a ) count as a sentence?
+14.3 Formulas Here is the approach we will use to rigorously specify sentences of first-order logic and to deal with the issues arising from the use of variables.
+We first define a different set of expressions: formulas.
+Once we’ve done that, we can consider the role variables play in them—and on the basis of some other ideas, namely those of “free” and “bound” variables, we can define what a sentence is (namely, a formula without free variables).
+We do this not just because it makes the definition of “sentence” more manageable, but also because it will be crucial to the way we define the semantic notion of satisfaction.
+Let’s define “formula” for a simple first-order language, one containing only a single predicate symbol P and a single constant symbol a, and only the logical symbols ¬, ∧, and ∃.
+The set of formulas Frm is defined as follows: 1.
+P (a ) and P (vi ) are formulas (i ∈ N).
+If φ is a formula and x is a variable, then ∃ x φ is a formula.
+(1) tells us that P (a ) and P (vi ) are formulas, for any i ∈ N.
+These are the so-called atomic formulas.
+The other clauses give us ways of forming new formulas from ones we have already formed.
+So for instance, by (2), we get that ¬P (v2 ) is a formula, since P (v2 ) is already a formula by (1).
+Then, by (4), we get that ∃v2 ¬P (v2 ) is another formula, and so on.
+(5) tells us that only strings we can form in this way count as formulas.
+In particular, ∃v0 P (a ) and ∃v0 ∃v0 P (a ) do count as formulas, and (¬P (a)) does not, because of the extraneous outer parentheses.
+This way of defining formulas is called an inductive definition, and it allows us to prove things about formulas using a version of proof by induction called structural induction.
+These are discussed in a general way in section 74.4 and section 74.5, which you should review before delving into the proofs later on.
+Basically, the idea is that if you want to give a proof that something is true for all formulas, you show first that it is true for the atomic formulas, and then that if it’s true for any formula φ (and ψ), it’s also true for ¬ φ, ( φ ∧ ψ), and ∃ x φ.
+For instance, this proves that it’s true for ∃v2 ¬P (v2 ): from the first part you know that it’s true for the atomic formula P (v2 ).
+Since all formulas are inductively generated from atomic formulas, this works for any of them.
+14.4 Satisfaction We can already skip ahead to the semantics of first-order logic once we know what formulas are: here, the basic definition is that of a structure.
+This is enough to give a definition of satisfaction for formulas that don’t contain variables.
+The idea is to give an inductive definition that mirrors the way we have defined formulas.
+We specify when an atomic formula is satisfied in M, and then when, e.g., ¬ φ is satisfied in M on the basis of whether or not φ is satisfied in M.
+The trouble comes when we want to give a definition for the quantifiers: we’d like to say something like, “∃v0 P (v0 ) is satisfied iff P (v0 ) is satisfied.” But the structure M doesn’t tell us what to do about variables.
+Since we don’t know beforehand which variables might appear in a formula we can’t limit which variables s assigns values to.
+Instead of defining satisfaction of formulas just relative to a structure, we’ll define it relative to a structure M and a variable assignment s, and write M, s ⊨ φ for short.
+Our definition will now include an additional clause to deal with atomic formulas containing variables: 1.
+But the added complexity is required to give a precise, inductive definition of satisfaction for all formulas, and we need something like it to precisely define the semantic notions.
+14.5 Sentences Ok, now we have a (sketch of a) definition of satisfaction (“true in”) for structures and formulas.
+But it needs this additional bit—a variable assignment— and what we wanted is a definition of sentences.
+How do we get rid of assignments, and what are sentences?
+You probably remember a discussion in your first introduction to formal logic about the relation between variables and quantifiers.
+A quantifier is always followed by a variable, and then in the part of the sentence to which that quantifier applies (its “scope”), we understand that the variable is “bound” by that quantifier.
+In formulas it was not required that every variable has a matching quantifier, and variables without matching quantifiers are “free” or “unbound.” We will take sentences to be all those formulas that have no free variables.
+Again, the intuitive idea of when an occurrence of a variable in a formula φ is bound, which quantifier binds it, and when it is free, is not difficult to get.
+We have to insist on a precise definition—and because we have defined formulas by induction, we can give a definition of the free and bound occurrences of a variable x in a formula φ also by induction.
+Once we have a precise definition of free and bound occurrences of variables, we can simply say: a sentence is any formula without free occurrences of variables.
+SEMANTIC NOTIONS 14.6 Semantic Notions We mentioned above that when we consider whether M, s ⊨ φ holds, we (for convenience) let s assign values to all variables, but only the values it assigns to variables in φ are used.
+Since sentences have no free variables, s doesn’t matter at all when it comes to whether or not they are satisfied in a structure.
+So, when φ is a sentence we can define M ⊨ φ to mean “M, s ⊨ φ for all s,” which as it happens is true iff M, s ⊨ φ for at least one s.
+We need to introduce variable assignments to get a working definition of satisfaction for formulas, but for sentences, satisfaction is independent of the variable assignments.
+Once we have a definition of “M ⊨ φ,” we know what “case” and “true in” mean as far as sentences of first-order logic are concerned.
+On the basis of the definition of M ⊨ φ for sentences we can then define the basic semantic notions of validity, entailment, and satisfiability.
+A sentence is valid, ⊨ φ, if every structure satisfies it.
+It is entailed by a set of sentences, Γ ⊨ φ, if every structure that satisfies all the sentences in Γ also satisfies φ.
+And a set of sentences is satisfiable if some structure satisfies all sentences in it at the same time.
+We’ll collect and prove some of these properties, partly because they are individually interesting, but mainly because many of them will come in handy when we go on to investigate the relation between semantics and derivation systems.
+14.7 Substitution We’ll discuss an example to illustrate how things hang together, and how the development of syntax and semantics lays the foundation for our more advanced investigations later.
+Our derivation systems should let us derive P (a ) from ∀v0 P (v0 ).
+Maybe we even want to state this as a rule of inference.
+However, to do so, we must be able to state it in the most general terms: not just for P , a, and v0 , but for any formula φ, and term t, and variable x.
+But once this is done, specifying an inference rule as “infer φ(t) from ∀ x φ( x )” becomes a precise definition.
+Moreover, we’ll be able to show that this is a good inference rule in the sense that ∀ x φ( x ) entails φ(t).
+14.8 Models and Theories Once we’ve defined the syntax and semantics of first-order logic, we can get to work investigating the properties of structures and the semantic notions.
+We can also define derivation systems, and investigate those.
+For a set of sentences, we can ask: what structures make all the sentences in that set true?
+Given a set of sentences Γ, a structure M that satisfies them is called a model of Γ.
+But we might also start with a single structure or collection of structures and ask: what sentences are true in them?
+Are there sentences that characterize these structures in the sense that they, and only they, are true in them?
+They also underlie the axiomatic method: describing a collection of structures by a set of sentences, the axioms of a theory.
+This is made possible by the observation that exactly those sentences entailed in first-order logic by the axioms are true in all models of the axioms.
+We see that a structure M is a model of these two sentences Γ iff R (i.e., P M ), is a preorder on A (i.e., |M|).
+SOUNDNESS AND COMPLETENESS just P as predicate symbol (like reflexivity and transitivity above), is entailed by the two sentences in Γ and vice versa.
+One can also express, using a set of infinitely many sentences, that the domain is infinite.
+These results about the limitations of first-order languages are consequences of the compactness and Löwenheim– Skolem theorems.
+14.9 Soundness and Completeness We’ll also introduce derivation systems for first-order logic.
+There are many derivation systems that logicians have developed, but they all define the same derivability relation between sentences.
+We say that Γ derives φ, Γ ⊢ φ, if there is a derivation of a certain precisely defined sort.
+Derivations are always finite arrangements of symbols—perhaps a list of sentences, or some more complicated structure.
+The purpose of derivation systems is to provide a tool to determine if a sentence is entailed by some set Γ.
+If Γ ⊢ φ but not Γ ⊨ φ, our derivation system would be too strong, prove too much.
+The property that if Γ ⊢ φ then Γ ⊨ φ is called soundness, and it is a minimal requirement on any good derivation system.
+On the other hand, if Γ ⊨ φ but not Γ ⊢ φ, then our derivation system is too weak, it doesn’t prove enough.
+The property that if Γ ⊨ φ then Γ ⊢ φ is called completeness.
+Soundness is usually relatively easy to prove (by induction on the structure of derivations, which are inductively defined).
+Soundness and completeness have a number of important consequences.
+If a set of sentences Γ derives a contradiction (such as φ ∧ ¬ φ) it is called inconsistent.
+From completeness the converse follows: any Γ that is not inconsistent—or, as we will say, consistent—has a model.
+In fact, this is equivalent to completeness, and is the form of completeness we will actually prove.
+So completeness gives an answer to the question: which sets of sentences have models?
+The soundness and completeness theorems have two important conseRelease : 9f12419 (2026-05-25) 205 CHAPTER 14.
+INTRODUCTION TO FIRST-ORDER LOGIC quences: the compactness and the Löwenheim–Skolem theorem.
+206 Release : 9f12419 (2026-05-25) Chapter 15 Syntax of First-Order Logic 15.1 Introduction In order to develop the theory and metatheory of first-order logic, we must first define the syntax and semantics of its expressions.
+The expressions of first-order logic are terms and formulas.
+Formulas, in turn, are formed from predicate symbols together with terms (these form the smallest, “atomic” formulas), and then from atomic formulas we can form more complex ones using logical connectives and quantifiers.
+Other systems will chose different symbols, will select different sets of connectives as primitive, will use parentheses differently (or even not at all, as in the case of so-called Polish notation).
+From them, together with logical connectives, quantifiers, and punctuation symbols such as parentheses and commas, terms and formulas are formed.
+SYNTAX OF FIRST-ORDER LOGIC termined by its non-logical symbols.
+Logical symbols a) Logical connectives: ¬ (negation), ∧ (conjunction), ∨ (disjunction), → (conditional), ∀ (universal quantifier), ∃ (existential quantifier).
+Most of our definitions and results will be formulated for the full standard language of first-order logic.
+TERMS AND FORMULAS if we only used primitive symbols, get quite long.
+for “negation”, ∧, ·, or & for “conjunction”.
+Symbols for “biconditional,” “biimplication,” or “(material) equivalence” are ↔, ⇔, and ≡.
+Quantifiers combine with variables, e.g., x; notational variations include ∀ x, (∀ x ), ( x ), V W Πx, x for the universal quantifier and ∃ x, (∃ x ), ( Ex ), Σx, x for the existential quantifier.
+We might treat all the propositional operators and both quantifiers as primitive symbols of the language.
+“Truth functionally complete” sets of Boolean operators include {¬, ∨}, {¬, ∧}, and {¬, →}—these can be combined with either quantifier for an expressively complete first-order language.
+When given their usual readings of “nand” and “nor” (respectively), these operators are truth functionally complete by themselves.
+15.3 Terms and Formulas Once a first-order language L is given, we can define expressions built up from the basic vocabulary of L.
+These include in particular terms and formulas.
+SYNTAX OF FIRST-ORDER LOGIC The constant symbols appear in our specification of the language and the terms as a separate category of symbols, but they could instead have been included as zero-place function symbols.
+The set of formulas Frm(L) of the language L is defined inductively as follows: 1.
+If t1 and t2 are terms of L, then =(t1 , t2 ) is an atomic formula.
+If φ is a formula and x is a variable, then ∀ x φ is a formula.
+The definitions of the set of terms and that of formulas are inductive definitions.
+Some logic texts require that the variable x must occur in φ in order for ∃ x φ and ∀ x φ to count as formulas.
+As terms and formulas are built up from basic elements via inductive definitions, we can use the following induction principles to prove things about them.
+Lemma 15.9 (Principle of induction on formulas).
+it holds for ∀ x φ whenever it holds for φ; (assuming φ and ψ are formulas of L), then P holds for all formulas in Frm(L).
+15.4 Unique Readability The way we defined formulas guarantees that every formula has a unique reading, i.e., there is essentially only one way of constructing it according to our formation rules for formulas and only one way of “interpreting” it.
+If this were not so, we would have ambiguous formulas, i.e., formulas that have more than one reading or intepretation—and that is clearly something we want to avoid.
+But more importantly, without this property, most of the definitions and proofs we are going to give will not go through.
+Perhaps the best way to make this clear is to see what would happen if we had given bad rules for forming formulas that would not guarantee unique readability.
+For instance, we could have forgotten the parentheses in the formation rules for connectives, e.g., we might have allowed this: If φ and ψ are formulas, then so is φ → ψ.
+Starting from an atomic formula θ, this would allow us to form θ → θ.
+Correspondingly, there are two ways to “read” the formula θ → θ → θ.
+For instance, when we define the main operator of a formula, we say: in a formula of the form ψ → χ, the main operator is the indicated occurrence of →.
+But if we can match the formula θ → θ → θ with ψ → χ in the two different ways mentioned above, then in one case we get the first occurrence of → as the main operator, and in the second case the second occurrence.
+But we intend the main operator to be a function of the formula, i.e., every formula must have exactly one main operator occurrence.
+The number of left and right parentheses in a formula φ are equal.
+This requires two things: (a) We have to prove first that all atomic formulas have the property in question (the induction basis).
+(b) Then we have to prove that when we construct new formulas out of given formulas, the new formulas have the property provided the old ones do.
+If φ is a formula, and ψ is a proper prefix of φ, then ψ is not a formula.
+If φ is an atomic formula, then it satisfies one, and only one of the following conditions.
+SYNTAX OF FIRST-ORDER LOGIC Proposition 15.14 (Unique Readability).
+Every formula satisfies one, and only one of the following conditions.
+The formation rules require that if a formula is not atomic, it must start with an opening parenthesis (, ¬, or a quantifier.
+On the other hand, every formula that starts with one of the following symbols must be atomic: a predicate symbol, a function symbol, a constant symbol, ⊥.
+15.5 Main operator of a Formula It is often useful to talk about the last operator used in constructing a formula φ.
+The main operator of a formula φ is defined as follows: 1.
+In each case, we intend the specific indicated occurrence of the main operator in the formula.
+For instance, since the formula ((θ → α) → (α → θ )) is of the form (ψ → χ) where ψ is (θ → α) and χ is (α → θ ), the second occurrence of → is the main operator.
+This is a recursive definition of a function which maps all non-atomic formulas to their main operator occurrence.
+Because of the way formulas are defined inductively, every formula φ satisfies one of the cases in Definition 15.15.
+This guarantees that for each non-atomic formula φ a main operator exists.
+Because each formula satisfies only one of these conditions, and because the smaller formulas from which φ is constructed are uniquely determined in each case, the main operator occurrence of φ is unique, and so we have defined a function.
+We call formulas by the names in Table 15.1 depending on which symbol their main operator is.
+Recall, however, that defined operators do not officially appear in formulas.
+They are just abbreviations, so officially they cannot be the main operator of a formula.
+In proofs about all formulas they therefore do not have to be treated separately.
+Main operator Type of formula Example none atomic (formula) ⊥, R ( t1 , .
+Any formula counts as a subformula of itself; a subformula of φ other than φ itself is a proper subformula.
+If φ is a formula, the immediate subformulas of φ are defined inductively as follows: Release : 9f12419 (2026-05-25) 215 CHAPTER 15.
+Atomic formulas have no immediate subformulas.
+φ ≡ (ψ ∗ χ): The immediate subformulas of φ are ψ and χ (∗ is any one of the two-place connectives).
+If φ is a formula, the proper subformulas of φ are defined recursively as follows: 1.
+Atomic formulas have no proper subformulas.
+In the first case, we have directly defined the immediate subformulas of a formula φ for each possible form of φ.
+It is an explicit definition by cases, and the cases mirror the inductive definition of the set of formulas.
+In the second case, we have also mirrored the way the set of all formulas is defined, but in each case we have also included the proper subformulas of the smaller formulas ψ, χ in addition to these formulas themselves.
+In general, a definition of a function on an inductively defined set (in our case, formulas) is recursive if the cases in the definition of the function make use of the function itself.
+Suppose φ is a formula with n connectives and quantifiers.
+FORMATION SEQUENCES 15.7 Formation Sequences Defining formulas via an inductive definition, and the complementary technique of proving properties of formulas via induction, is an elegant and efficient approach.
+To show how terms and formulas can be introduced in this way without needing to refer to their inductive definitions, we first introduce the notion of an arbitrary string of symbols drawn from some language L.
+For any first-order language L, all L-formulas are L-strings, but not conversely.
+For example, )(v0 → ∃ is an L-string but not an L-formula.
+Definition 15.25 (Formation sequences for formulas).
+, φn ⟩ is a formation sequence for φ if φ ≡ φn and for all i ≤ n, either φi is an atomic formula or there exist j, k < i and a variable x such that one of the following holds: 1.
+When it is necessary to distinguish, we will refer to formation sequences for formulas as formula formation sequences.
+Every formula φ in Frm(L) has a formation sequence.
+Frm(L) is the set of all L-strings φ such that there exists a formula formation sequence for φ.
+Formation sequences for terms have similar properties to those for formulas.
+SYNTAX OF FIRST-ORDER LOGIC Definition 15.31 (Minimal formation sequences).
+, φn ⟩ for a formula φ is a minimal formation sequence for φ if for every other formation sequence s for φ, the length of s is greater than or equal to n + 1.
+Note that a formula or term can have more than one minimal formation sequence, but they will contain exactly the same strings.
+15.8 Free Variables and Sentences Definition 15.33 (Free occurrences of a variable).
+The free occurrences of a variable in a formula are defined inductively as follows: 1.
+An occurrence of a variable in a formula φ is bound if it is not free.
+If ∀ x ψ is an occurrence of a subformula in a formula φ, then the corresponding occurrence of ψ in φ is called the scope of the corresponding occurrence of ∀ x.
+If ψ is the scope of a quantifier occurrence ∀ x or ∃ x in φ, then the free occurrences of x in ψ are bound in ∀ x ψ and ∃ x ψ.
+We say that these occurrences are bound by the mentioned quantifier occurrence.
+Consider the following formula: ∃v0 A20 (v0 , v1 ) | {z } ψ ψ represents the scope of ∃v0 .
+The quantifier binds the occurrence of v0 in ψ, but does not bind the occurrence of v1 .
+We can now see how this might work in a more complicated formula φ: θ z }| { ∀v0 (A10 (v0 ) → A20 (v0 , v1 )) →∃v1 (A21 (v0 , v1 ) ∨ ∀v0 ¬A11 (v0 )) | {z ψ } | {z χ } ψ is the scope of the first ∀v0 , χ is the scope of ∃v1 , and θ is the scope of the second ∀v0 .
+A formula φ is a sentence iff it contains no free occurrences of variables.
+A term t is free for x in φ if none of the free occurrences of x in φ occur in the scope of a quantifier that binds a variable in t.
+f12 (v1 , v2 ) is not free for v0 in ∀v2 A24 (v0 , v2 ) Definition 15.41 (Substitution in a formula).
+If φ is a formula, x is a variable, and t is a term free for x in φ, then φ[t/x ] is the result of substituting t for all free occurrences of x in φ.
+In this case the free variable y is “captured” by the quantifier ∃y upon substitution, and that is undesirable.
+It is a sentence that is true about, e.g., the natural numbers: for every number x there is a number y greater than it.
+We prevent this by requiring that none of the free variables in t would end up being bound by a quantifier in φ.
+We often use the following convention to avoid cumbersome notation: If φ is a formula which may contain the variable x free, we also write φ( x ) to indicate this.
+So for instance, we might say, “we call φ(t) an instance of ∀ x φ( x ).” By this we mean that if φ is any formula, x a variable, and t a term that’s free for x in φ, then φ[t/x ] is an instance of ∀ x φ.
+Prove Proposition 15.13 (Hint: Formulate and prove a version of Lemma 15.12 for terms.) Problem 15.5.
+Hint: use a similar strategy to that used in the proof of Theorem 15.29.
+Release : 9f12419 (2026-05-25) 223 Chapter 16 Semantics of First-Order Logic 16.1 Introduction Giving the meaning of expressions is the domain of semantics.
+The central concept in semantics is that of satisfaction in a structure.
+The quantifiers are interpreted as ranging over this domain, constant symbols are assigned elements in the domain, function symbols are assigned functions from the domain to itself, and predicate symbols are assigned relations on the domain.
+Variables may appear in formulas, and in order to give a semantics, we also have to assign elements of the domain to them—this is a variable assignment.
+A formula may be satisfied in a structure M relative to a variable assignment s, written as M, s ⊨ φ.
+This relation is also defined by induction on the structure of φ, using the truth tables for the logical connectives to define, say, satisfaction of ( φ ∧ ψ) in terms of satisfaction (or not) of φ and ψ.
+It then turns out that the variable assignment is irrelevant if the formula φ is a sentence, i.e., has no free variables, and so we can talk of sentences being simply satisfied (or not) in structures.
+On the basis of the satisfaction relation M ⊨ φ for sentences we can then define the basic semantic notions of validity, entailment, and satisfiability.
+It specifies the domain, i.e., the objects which the constant symbols pick out, the function symbols operate on, and the quantifiers range over.
+Structures are the basis for semantic notions in logic, e.g., the notion of consequence, validity, satisfiability.
+SEMANTICS OF FIRST-ORDER LOGIC However, there are many other possible structures for L A .
+For example, the choice to prevent empty domains ensures, given the usual account of satisfaction (or truth) for quantified sentences, that ∃ x ( φ( x ) ∨ ¬ φ( x )) is valid—that is, a logical truth.
+And the stipulation that all constant symbols must refer to an object in the domain ensures that the existential generalization is a sound pattern of inference: φ( a), therefore ∃ x φ( x ).
+If we allowed names to refer outside the domain, or to not refer, then we would be on our way to a free logic, in which existential generalization requires an additional premise: φ( a) and ∃ x x = a, therefore ∃ x φ( x ).
+SATISFACTION OF A FORMULA IN A STRUCTURE assignments z er o M = 0, one M = 1, tw o M = 2, and so forth.
+A formula is satisfied in a structure if the interpretation given to the predicates makes the formula true in the domain of the structure.
+The case of the quantifiers here is a bit tricky, as the immediate subformula of a quantified formula has a free variable, and structures don’t specify the values of variables.
+SEMANTICS OF FIRST-ORDER LOGIC name elements of the domain.
+Satisfaction of a formula φ in a structure M relative to a variable assignment s, in symbols: M, s ⊨ φ, is defined recursively as follows.
+SATISFACTION OF A FORMULA IN A STRUCTURE 7.
+SEMANTICS OF FIRST-ORDER LOGIC To compute the value of f ( f ( a, b), a) we have to consider M M M M ValM s ( f ( f ( a, b ), a )) = f (Vals ( f ( a, b )), Vals ( a )) = f (3, 1) = 3, since 3 + 1 > 3.
+To determine if a non-atomic formula φ is satisfied, you apply the clauses in the inductive definition that applies to the main connective.
+To determine if an existentially quantified formula ∃ x φ( x ) is satisfied, we have to determine if M, s[m/x ] ⊨ φ( x ) for at least one m ∈ |M|.
+SATISFACTION OF A FORMULA IN A STRUCTURE since M, s[1/x ] ⊨ R(b, x ) ∨ R( x, b) (s[3/x ] would also fit the bill).
+To determine if a universally quantified formula ∀ x φ( x ) is satisfied, we have to determine if M, s[m/x ] ⊨ φ( x ) for all m ∈ |M|.
+SEMANTICS OF FIRST-ORDER LOGIC 16.5 Variable Assignments A variable assignment s provides a value for every variable—and there are infinitely many of them.
+The value of a term t, and whether or not a formula φ is satisfied in a structure with respect to s, only depend on the assignments s makes to the variables in t and the free variables of φ.
+In the latter two cases, we only demonstrate the forward direction of the biconditional, since the proof of the reverse is symmetrical.
+Now assume M, s1 ⊨ ψ iff M, s2 ⊨ ψ for all formulas ψ less complex than φ.
+In each case, we only demonstrate the forward direction of the biconditional; the proof of the reverse direction is symmetrical.
+In all cases except those for the quantifiers, we apply the induction hypothesis to sub-formulas ψ of φ.
+SEMANTICS OF FIRST-ORDER LOGIC By induction, we get that M, s1 ⊨ φ iff M, s2 ⊨ φ whenever the free variables in φ are among x1 , .
+Sentences have no free variables, so any two variable assignments assign the same things to all the (zero) free variables of any sentence.
+The proposition just proved then means that whether or not a sentence is satisfied in a structure relative to a variable assignment is completely independent of the assignment.
+It justifies the definition of satisfaction of a sentence in a structure (without mentioning a variable assignment) that follows.
+If φ is a sentence and s a variable assignment, then M, s ⊨ φ iff M, s′ ⊨ φ for every variable assignment s′ .
+Since φ is a sentence, it has no free variables, and so every variable assignment s′ trivially assigns the same things to all free variables of φ as does s.
+If φ is a sentence, we say that a structure M satisfies φ, M ⊨ φ, iff M, s ⊨ φ for all variable assignments s.
+The notion of satisfaction naturally extends from individual sentences to sets of sentences.
+If Γ is a set of sentences Γ, we say that a structure M satisfies Γ, M ⊨ Γ, iff M ⊨ φ for all φ ∈ Γ.
+Let M be a structure, φ be a sentence, and s a variable assignment.
+One immediate consequence of extensionality is that where two structures M and M′ agree on all the elements of the language appearing in a sentence φ and have the same domain, M and M′ must also agree on whether or not φ itself is true.
+Let φ be a formula, and M1 and M2 be structures with |M1 | = |M2 |, and s a variable assignment on |M1 | = |M2 |.
+Corollary 16.21 (Extensionality for Sentences).
+Let φ be a sentence and M1 , M2 as in Proposition 16.20.
+Moreover, the value of a term, and whether or not a structure satisfies a formula, only depend on the values of its subterms.
+Let M be a structure, φ a formula, t′ a term, and s a variable ′ assignment.
+Suppose we have a term t or a formula φ and some term t′ , and we want to know the value of t[t′ /x ] or whether or not φ[t′ /x ] is satisfied in a structure M relative to a variable assignment s.
+16.7 Semantic Notions Given the definition of structures for first-order languages, we can define some basic semantic properties of and relationships between sentences.
+The simplest of these is the notion of validity of a sentence.
+A sentence is valid if it is satisfied in every structure.
+Valid sentences are those that are satisfied regardless of how the non-logical symbols in it are interpreted.
+Valid sentences are therefore also called logical truths—they are true, i.e., satisfied, in any structure and hence their truth depends only on the logical symbols occurring in them and their syntactic structure, but not on the non-logical symbols or their interpretation.
+A sentence φ is valid, ⊨ φ, iff M ⊨ φ for every structure M.
+SEMANTIC NOTIONS Definition 16.25 (Entailment).
+A set of sentences Γ entails a sentence φ, Γ ⊨ φ, iff for every structure M with M ⊨ Γ, M ⊨ φ.
+A set of sentences Γ is satisfiable if M ⊨ Γ for some structure M.
+If Γ is not satisfiable it is called unsatisfiable.
+A sentence φ is valid iff Γ ⊨ φ for every set of sentences Γ.
+For the forward direction, let φ be valid, and let Γ be a set of sentences.
+Hence, there is a structure M so that M ⊨ Γ but M ⊭ φ, hence Γ does not entail φ.
+Also, since M ⊨ Γ ∪ {¬ φ}, M ⊨ ¬ φ, so we have both M ⊨ φ and M ⊭ φ, a contradiction.
+Theorem 16.30 (Semantic Deduction Theorem).
+If M ⊨ φ, then M ⊨ Γ ∪ { φ}, so since Γ ∪ { φ} entails ψ, we get M ⊨ ψ.
+Let M be a structure, and φ( x ) a formula with one free variable x, and t a closed term.
+Then M, s ⊨ φ(t) since φ(t) is a sentence.
+(b) Give a different structure and variable assignment in which the formula is not satisfied.
+Complete the proof of Proposition 16.14.
+(This problem shows that it is possible to give a semantics for first-order logic that makes do without variable assignments.) Problem 16.7.
+(This problem is a special case of what’s known as Skolem’s Theorem; ∀ x φ( x, f ( x )) is called a Skolem normal form of ∀ x ∃y φ( x, y).) Problem 16.8.
+Carry out the proof of Proposition 16.20 in detail.
+Complete the proof of Proposition 16.31.
+Release : 9f12419 (2026-05-25) 239 Chapter 17 Theories and Their Models 17.1 Introduction The development of the axiomatic method is a significant achievement in the history of science, and is of special importance in the history of mathematics.
+An axiomatic development of a field involves the clarification of many questions: What is the field about?
+The axiomatic method and logic were made for each other.
+Formal logic provides the tools for formulating axiomatic theories, for proving theorems from the axioms of the theory in a precisely specified way, for studying the properties of all systems satisfying the axioms in a systematic way.
+A set of sentences Γ is closed iff, whenever Γ ⊨ φ then φ ∈ Γ.
+The closure of a set of sentences Γ is { φ : Γ ⊨ φ}.
+We say that Γ is axiomatized by a set of sentences ∆ if Γ is the closure of ∆.
+We can think of an axiomatic theory as the set of sentences that is axiomatized by its set of axioms ∆.
+This ranges from simple examples with only a single primitive and simple axioms, such as the theory of partial orders, to complex theories such as Newtonian mechanics.
+The important logical facts that make this formal approach to the axiomatic method so important are the following.
+Suppose Γ is an axiom system for a theory, i.e., a set of sentences.
+We can state precisely when an axiom system captures an intended class of structures.
+That is, if we are interested in a certain class of structures, we will successfully capture that class by an axiom system Γ iff the structures are exactly those M such that M ⊨ Γ.
+This may lead us to add axioms which are not true in M.
+If we are successful at least in the respect that Γ is true in all the intended structures, then a sentence φ is true in all intended structures whenever Γ ⊨ φ.
+Thus we can use logical tools (such as derivation methods) to show that sentences are true in all intended structures simply by showing that they are entailed by the axioms.
+Sometimes we don’t have intended structures in mind, but instead start from the axioms themselves: we begin with some primitives that we want to satisfy certain laws which we codify in an axiom system.
+One thing that we would like to verify right away is that the axioms do not contradict each other: if they do, there can be no concepts that obey these laws, and we have tried to set up an incoherent theory.
+The independence of the axioms is likewise an important question.
+It may happen that one of the axioms is actually a consequence of the others, and so is redundant.
+We can prove that an axiom φ in Γ is redundant by proving Γ \ { φ} ⊨ φ.
+We can also prove that an axiom is not redundant by showing that ( Γ \ { φ}) ∪ {¬ φ} is satisfiable.
+For instance, this is how it was shown that the parallel postulate is independent of the other axioms of geometry.
+But can we do this with sentences of the language?
+In other words, which conditions on a structure M can we express by a sentence (or perhaps a set of sentences) in the language of M?
+For instance, there is no sentence of L A which is only true in a structure M if |M| = N.
+Which properties of structures can we express by sentences?

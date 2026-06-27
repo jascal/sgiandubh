@@ -12,6 +12,17 @@ it. Nothing in the pipeline is domain-specific — the corpus *is* the configura
    (+ citations)            (candidate / contrib / predicted)    ──►  ./sgiandubh  →  OpenAI /v1/chat/completions
 ```
 
+## One command (the two demo experts)
+The whole staged pipeline below is wrapped for the riscv + logic demo experts — distilled, end to end, on a CPU box:
+```bash
+# prereqs: souffle, g++, python3+numpy+scipy, a built fieldrun, a model bundle. Logic corpus ships in corpora/;
+# RISC-V needs norm-rules.json from a riscv-isa-manual release.
+BUNDLE=~/.cache/fieldrun/bundles/Qwen2.5-7B-Instruct/Qwen2.5-7B-Instruct \
+NORM_RULES=/path/to/norm-rules.json ./tools/build_experts.sh        # ONLY=logic|riscv to build one; STEPS=N for depth
+```
+`tools/build_expert.sh` is the reusable one-expert builder it calls (`--out … --bundle … --questions … --grounding …`);
+use it directly for your own corpus. The stages below are what those scripts run.
+
 ## Two ways to build (the model is optional)
 - **Model-free** (fastest — specs, manuals, structured references): *skip fieldrun.* Turn the source into passages,
   then `build_grounding` + `build_gram`, and serve with `--answer-from-corpus` (return the best-matching passage

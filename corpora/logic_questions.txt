@@ -1,0 +1,34 @@
+What is a tautology in propositional logic?
+What is a contradiction in propositional logic?
+What is a contingent formula?
+What does it mean for an argument to be valid?
+What is the difference between a valid argument and a sound argument?
+What is modus ponens?
+What is modus tollens?
+What is the law of the excluded middle?
+What is a truth table and how is it used?
+What are the logical connectives in propositional logic?
+What is logical equivalence?
+What is the difference between syntax and semantics in logic?
+What does it mean for a set of formulas to be satisfiable?
+What is a logical consequence?
+What is first-order predicate logic?
+What are the logical operators in first-order logic?
+What is the difference between propositional logic and first-order logic?
+What is a quantifier?
+What is the difference between universal and existential quantifiers?
+What is a predicate in first-order logic?
+What is the difference between a free variable and a bound variable?
+What is a term in first-order logic?
+What is a model (structure) in first-order logic?
+What does it mean for a formula to be valid in first-order logic?
+What is a derivation in a formal proof system?
+What is the sequent calculus?
+What is natural deduction?
+What is the soundness theorem?
+What is the completeness theorem?
+What is the compactness theorem?
+What is the Löwenheim–Skolem theorem?
+What does it mean for a proof system to be sound and complete?
+What is an axiom schema?
+What is the difference between a theory and a model?
