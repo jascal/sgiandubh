@@ -80,8 +80,14 @@ specific vectors file; `--dim 0` skips vectors (no numpy/scipy).
 
 ## Stage 3 — build (sgiandubh)
 ```bash
-./build.sh        # souffle -g engine + g++  →  ONE binary (engine embedded), ~1.2 MB
+./build.sh                                   # souffle -g engine + g++  →  ONE binary (engine embedded), ~1.2 MB
+./build.sh --with-core                       # also union the ergo core reasoning KB into the engine (derive, don't just recall)
+CORE_DL=/path/to/ergo/core.dl ./build.sh     # ...from an explicit path (default: ../ergo/core.dl)
 ```
+`--with-core` is opt-in: it reads ergo's *single* `core.dl` at build time into an ephemeral combined `.dl` under
+`build/` (gitignored, regenerated each build) — no committed copy. Off by default → the plain decode engine. (The
+shared reasoning rules are compiled in once; the per-expert structured-shadow *facts* are loaded like the decode facts.
+See `claymore/docs/core-reasoning-kb.md` and the `ergo` repo.)
 
 ## Stage 4 — deploy
 ```bash
