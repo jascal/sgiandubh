@@ -6,3 +6,4 @@ souffle-compile-*
 /package_de/
 /package_ap/
 /package_*/
+__pycache__/
