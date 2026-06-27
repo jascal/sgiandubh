@@ -355,7 +355,9 @@ static Answer answer(const std::string& user) {
     if (g_require_citation && !cited) { a.content = a.body = ABSTAIN; a.kind = "abstain"; return a; }
 
     a.body = body;
-    a.citation = gp ? gp->section : item_cite;
+    // Prefer the grounding passage's section, but only if it HAS one — otherwise keep the item's own citation.
+    // (A section-less grounding passage must not clobber a real item citation, e.g. logic's "Open Logic Project".)
+    a.citation = (gp && !gp->section.empty()) ? gp->section : item_cite;
     a.passage = gp ? gp->text : std::string();
     a.content = body + prov + (is_generated && !gp ? "\n\n(generated from the material)" : "");
     a.lp = lp;
