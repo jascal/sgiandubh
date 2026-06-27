@@ -93,6 +93,19 @@ attach a supporting passage). Raise them to abstain more (precision), lower them
 - `GET /health` (alias `/healthz`) — readiness/liveness: `{model, engine, items, gram, grounding, knowledge_passages,
   status}` (200 ok / 503 if the embedded engine failed to load). Matches claymore's `/health` so a hub can probe it.
 
+**Structured retrieval — NON-STANDARD extension** (deliberately *not* under `/v1`, which is reserved for the
+OpenAI-compatible surface above). There is no OpenAI endpoint for "return a set of matching passages", so this is a
+small documented extension for "list / table / all X" queries the single-best chat path can't serve. Aggregation lives
+in the spoke (it owns the corpus + index), and the hub exposes it to LLMs as an ordinary tool — so the `/v1` surface
+stays a pristine drop-in and only callers that want aggregation touch the extension.
+- `POST /retrieve` — body `{query?, section?, k?, min_score?}` → `{count, matches:[{section, passage, score}]}`: a
+  *set* of cited passages ranked by similarity, not the single best. An empty `query` with a `section` lists that whole
+  section (pure faceted enumeration); a `query` ranks matches; `section` filters by facet (substring). Bounded:
+  `count` 0 when nothing clears `min_score`.
+- `GET /sections` — the distinct facets (the `· Facet` tail of each citation, deduped) you can filter `/retrieve` by.
+  Note: facets are limited to what the package carries (currently the citation's section). Richer faceting (e.g. an
+  instruction's *type*) needs the source adapter to preserve that structure instead of flattening it into passages.
+
 ## The package contract (`package/`)
 `index.json`:
 ```json

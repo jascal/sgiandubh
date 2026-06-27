@@ -188,6 +188,33 @@ static const Passage* retrieve_answer(const std::set<std::string>& qw) {
     return ground(qw, g_answer_cos_tau, g_answer_lex_tau);  // lexical fallback (jaccard is already discriminative)
 }
 
+// Retrieve-MANY: the structured-retrieval counterpart to retrieve_answer. Returns up to k passages scoring above a
+// threshold (cosine if vectors are loaded, else lexical Jaccard), best-first, optionally restricted to a `section`
+// (the one facet the package carries). This is the spoke-side primitive for "list / table / all X" queries the
+// single-best retriever can't serve — aggregation belongs where the data + index live, not at the hub.
+// An EMPTY query with a section lists everything in that section (pure faceted enumeration).
+static std::vector<std::pair<const Passage*, double>>
+retrieve_many(const std::set<std::string>& qw, int k, double min_score, const std::string& section) {
+    std::vector<std::pair<const Passage*, double>> hits;
+    bool vec = g_dim > 0;
+    std::vector<float> qv;
+    if (vec) { qv = embed(qw); if (qv.empty()) vec = false; }
+    bool list_all = qw.empty();                       // no query → the section filter alone selects
+    for (const auto& p : g_knowledge) {
+        if (!section.empty() && p.section.find(section) == std::string::npos) continue;
+        double s;
+        if (list_all) s = 1.0;
+        else if (vec) {
+            if ((int)p.vec.size() != g_dim) continue;
+            s = 0; for (int i = 0; i < g_dim; i++) s += (double)qv[i] * p.vec[i];
+        } else s = jaccard(qw, p.w);
+        if (s >= min_score) hits.push_back({&p, s});
+    }
+    std::sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    if (k > 0 && (int)hits.size() > k) hits.resize(k);
+    return hits;
+}
+
 // Run the EMBEDDED Datalog engine on a facts dir, in-process (no spawn). Returns the decided id + per-candidate logits.
 static Decision run_engine(const std::string& facts_dir) {
     Decision r;
@@ -548,6 +575,48 @@ int main(int argc, char** argv) {
     };
     svr.Get("/health", health);
     svr.Get("/healthz", health);
+
+    // Structured retrieval — a NON-STANDARD extension (deliberately NOT under /v1, which is reserved for the
+    // OpenAI-compatible surface). There is no OpenAI endpoint for "return a set of matching passages"; this is the
+    // spoke-side primitive for aggregation, exposed to LLMs as a normal tool by the hub. The /v1 surface stays pristine.
+    // POST {query?, section?, k?, min_score?} → a SET of cited passages (not the single best). For "list/table/all"
+    // queries: empty query + a section lists that whole section; a query ranks the matches. Bounded: count 0 if none.
+    svr.Post("/retrieve", [](const httplib::Request& q, httplib::Response& res) {
+        json body; try { body = json::parse(q.body); } catch (...) { body = json::object(); }
+        std::string query = body.value("query", "");
+        std::string section = body.value("section", "");
+        int k = body.value("k", 20);
+        double min_score = body.value("min_score", g_dim > 0 ? g_cos_tau : g_ground_tau);
+        auto hits = retrieve_many(words(query), k, min_score, section);
+        json arr = json::array();
+        for (const auto& h : hits)
+            arr.push_back({{"section", h.first->section}, {"passage", h.first->text}, {"score", h.second}});
+        json out;
+        out["object"] = "retrieval";
+        out["query"] = query;
+        out["section"] = section;
+        out["count"] = (int)hits.size();
+        out["matches"] = arr;
+        res.set_content(out.dump(), "application/json");
+    });
+    // Facet discovery (extension; not /v1) — the distinct facets you can filter /retrieve by. The section field is
+    // "id · Facet" (e.g. "norm:lw_op · RV32I Base ISA"); the useful facet is the part after the middle dot, so we
+    // surface those (deduped) rather than the thousands of per-item ids.
+    svr.Get("/sections", [](const httplib::Request&, httplib::Response& res) {
+        std::set<std::string> secs;
+        for (const auto& p : g_knowledge) {
+            std::string s = p.section;
+            auto dot = s.find("\xC2\xB7");                       // UTF-8 middle dot (·)
+            if (dot != std::string::npos) {
+                s = s.substr(dot + 2);
+                size_t a = s.find_first_not_of(' ');
+                s = (a == std::string::npos) ? std::string() : s.substr(a);
+            }
+            if (!s.empty()) secs.insert(s);
+        }
+        json out; out["object"] = "sections"; out["count"] = (int)secs.size(); out["sections"] = json(secs);
+        res.set_content(out.dump(), "application/json");
+    });
 
     svr.Post("/v1/chat/completions", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "chat"); });
     svr.Post("/v1/completions", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "text"); });       // OpenAI legacy
