@@ -19,6 +19,7 @@ import argparse, glob, json, os, re
 CAND = re.compile(r'candidate\((\d+)\)')
 CONTRIB = re.compile(r'contrib\("([^"]+)",\s*(\d+),\s*(-?[\d.eE+]+)\)')
 PRED = re.compile(r'model predicts:\s*"([^"]*)"\s*\[(\d+)\]')
+ROUTE = re.compile(r'route:\s*(\S+)\s+margin:\s*([+-]?[\d.eE]+)')  # fieldrun provenance tier + margin (per decision)
 STEP = re.compile(r'(\d+)\.dl$')           # trailing step number in a filename
 PROMPT = re.compile(r'p(\d+)_\d+\.dl$')    # --export-logic-corpus --out naming: p{prompt}_{step}.dl
 
@@ -35,7 +36,10 @@ def parse_dl(path):
     cands = [int(x) for x in CAND.findall(txt)]
     contribs = [(b, int(t), float(w)) for b, t, w in CONTRIB.findall(txt)]
     m = PRED.search(txt)
-    return cands, contribs, (_unescape(m.group(1)) if m else "")
+    rm = ROUTE.search(txt)
+    route = rm.group(1) if rm else "—"
+    margin = float(rm.group(2)) if rm else None
+    return cands, contribs, (_unescape(m.group(1)) if m else ""), route, margin
 
 
 def build_item(out, item_id, query, citation, dl_files):
@@ -44,9 +48,13 @@ def build_item(out, item_id, query, citation, dl_files):
         return None
     answer = ""
     first_cands, first_contribs = [], []
+    routes, margins = [], []
     for i, s in enumerate(steps):
-        cands, contribs, ptext = parse_dl(s)
+        cands, contribs, ptext, route, margin = parse_dl(s)
         answer += ptext
+        routes.append(route)
+        if margin is not None:
+            margins.append(margin)
         if i == 0:
             first_cands, first_contribs = cands, contribs
     fdir = os.path.join(out, f"facts_{item_id}")
@@ -57,7 +65,19 @@ def build_item(out, item_id, query, citation, dl_files):
     with open(os.path.join(fdir, "contrib.facts"), "w") as f:
         for b, t, w in first_contribs:
             f.write(f"{b}\t{t}\t{w}\n")
-    return {"id": item_id, "query": query, "answer": answer.strip(), "citation": citation, "facts": os.path.basename(fdir)}
+    item = {"id": item_id, "query": query, "answer": answer.strip(), "citation": citation, "facts": os.path.basename(fdir)}
+    # Provenance summary (the per-answer confidence signal): the answer is only as "retrieved" as its most-composed
+    # token, and only as solid as its thinnest-margin step (its fragile link). Surfaced so serving/debugging can show
+    # recall vs forge-tax. Omitted when the export carries no route (older fieldrun / no KB store → route "—").
+    order = {"RETRIEVED": 0, "SELECTED": 1, "COMPOSED": 2}
+    tiered = [r for r in routes if r in order]
+    if tiered:
+        item["route"] = max(tiered, key=lambda r: order[r])          # worst (most-composed) tier in the answer
+        item["n_composed"] = sum(1 for r in routes if r == "COMPOSED")
+        item["n_steps"] = len(routes)
+    if margins:
+        item["margin"] = round(min(margins), 3)                       # thinnest decision in the answer
+    return item
 
 
 def cite_for(cite, idx):

@@ -27,7 +27,8 @@
 using json = nlohmann::json;
 
 struct Item {
-    std::string id, question, citation, facts, answer;
+    std::string id, question, citation, facts, answer, route;  // route: RETRIEVED|SELECTED|COMPOSED (provenance tier)
+    double margin = 1e9;                                        // thinnest-decision margin in the answer (1e9 = absent)
     std::vector<std::string> options;
 };
 struct Decision {
@@ -297,6 +298,8 @@ struct Answer {
     std::string citation;  // section / rule id / source label ("" if none)
     std::string passage;   // the supporting passage it's grounded in ("" if none / the answer IS the passage)
     std::string kind;      // distilled | retrieved | generated | abstain
+    std::string route;     // provenance tier (RETRIEVED|SELECTED|COMPOSED) for a distilled answer ("" if n/a)
+    double margin = 1e9;   // thinnest-decision margin (1e9 = absent) — the answer's fragile-link signal
     double confidence = -1; // exp(decided logprob) for a model decision, else -1
     json lp;               // OpenAI logprobs object (null unless a model decision backed it)
     int ptoks = 0;
@@ -326,6 +329,7 @@ static Answer answer(const std::string& user) {
             body = "The answer is " + hit->options[d.decide] + ".";                     // MC: engine decides live
         else body = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)");
         is_answer = true; a.kind = "distilled";
+        a.route = hit->route; a.margin = hit->margin;   // carry the provenance tier + fragile-link margin
     }
     if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
         const Passage* gp = retrieve_answer(qw);                                        // retrieval-as-answer (strict + margin)
@@ -359,7 +363,15 @@ static Answer answer(const std::string& user) {
     // (A section-less grounding passage must not clobber a real item citation, e.g. logic's "Open Logic Project".)
     a.citation = (gp && !gp->section.empty()) ? gp->section : item_cite;
     a.passage = gp ? gp->text : std::string();
-    a.content = body + prov + (is_generated && !gp ? "\n\n(generated from the material)" : "");
+    std::string prov_tier;   // per-answer provenance/confidence marker (debug + calibration): tier + fragile-link margin
+    if (!a.route.empty() || a.margin < 1e8) {
+        char mb[64];
+        if (!a.route.empty() && a.margin < 1e8) snprintf(mb, sizeof mb, "%s · margin %+.2f", a.route.c_str(), a.margin);
+        else if (!a.route.empty()) snprintf(mb, sizeof mb, "%s", a.route.c_str());
+        else snprintf(mb, sizeof mb, "margin %+.2f", a.margin);
+        prov_tier = "\n\n[provenance: " + std::string(mb) + "]";
+    }
+    a.content = body + prov + prov_tier + (is_generated && !gp ? "\n\n(generated from the material)" : "");
     a.lp = lp;
     if (!lp.is_null() && lp.contains("content") && !lp["content"].empty())
         a.confidence = std::exp(lp["content"][0].value("logprob", 0.0));
@@ -398,6 +410,8 @@ static std::string structured_json(const Answer& a) {
     if (!a.citation.empty()) j["citation"] = a.citation;
     if (!a.passage.empty()) j["source"] = a.passage;
     if (a.confidence >= 0) j["confidence"] = a.confidence;
+    if (!a.route.empty()) j["route"] = a.route;          // provenance tier: RETRIEVED|SELECTED|COMPOSED
+    if (a.margin < 1e8) j["margin"] = a.margin;          // thinnest-decision margin (fragile-link signal)
     return j.dump();
 }
 
@@ -523,6 +537,8 @@ int main(int argc, char** argv) {
         x.citation = it.value("citation", "");
         x.facts = it.value("facts", "");
         x.answer = it.value("answer", "");
+        x.route = it.value("route", "");
+        x.margin = it.value("margin", 1e9);
         if (it.contains("options")) for (const auto& o : it["options"]) x.options.push_back(o.get<std::string>());
         g_items.push_back(x);
     }
