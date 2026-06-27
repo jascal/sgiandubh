@@ -7,3 +7,4 @@ souffle-compile-*
 /package_ap/
 /package_*/
 __pycache__/
+compile_commands.json
