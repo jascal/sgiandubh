@@ -3,14 +3,18 @@
 
 Grounding data for sgiandubh (no runtime model — embeddings are *data*, not a model):
   knowledge.tsv : section <TAB> passage  — the owner's content, attached verbatim to answers.
-  wordvec.txt   : `word v0 .. vD`        — corpus-derived word embeddings (PPMI + truncated SVD over THIS corpus),
-                  so the server can ground by *meaning* (cosine) instead of word-overlap. Built from the corpus
-                  alone; the server forms passage/query vectors by averaging this table at load/serve time, and
-                  falls back to lexical (Jaccard) grounding when wordvec.txt is absent.
+  wordvec.txt   : `word v0 .. vD`        — word embeddings restricted to the corpus vocab, so the server grounds by
+                  *meaning* (cosine) rather than word-overlap. The server averages this table to form passage/query
+                  vectors at serve time and falls back to lexical (Jaccard) grounding when wordvec.txt is absent — so
+                  the runtime stays model-free either way.
 
-Quality scales with corpus size: a whole textbook gives useful domain vectors; a few sentences will be noisy.
-Drop-in upgrade path: replace the PPMI+SVD vectors with pretrained ones (restricted to the corpus vocab) — same
-file format, no server change.
+DEFAULT: pretrained GloVe (auto-fetched once into ~/.cache/sgiandubh), restricted to the corpus vocab. Pretrained
+vectors live in one shared, well-calibrated semantic space, so cosines actually mean something — that is what makes
+off-domain queries abstain reliably and in-domain citations land on the right passage. This is the recommended path.
+  --corpus-vectors : the older PPMI+SVD-over-THIS-corpus vectors (no download, but noisy on small corpora, and each
+                     spoke gets its own incompatible space — which is why off-domain queries leak).
+  --pretrained P   : use a specific vectors file (GloVe/fastText text format) instead of auto-fetching GloVe.
+  --dim 0          : lexical only (no wordvec.txt; needs no numpy/scipy).
 """
 import argparse, os, re
 from collections import Counter
@@ -65,13 +69,61 @@ def build_wordvec(sentences, dim, cap):
     return list(zip(vocab, W)), k
 
 
+def ensure_glove(dim, cache=os.path.expanduser("~/.cache/sgiandubh")):
+    """Path to glove.6B.<dim>d.txt, extracting from (and downloading once if needed) glove.6B.zip in the cache."""
+    import zipfile, urllib.request
+    txt = os.path.join(cache, f"glove.6B.{dim}d.txt")
+    if os.path.exists(txt):
+        return txt
+    os.makedirs(cache, exist_ok=True)
+    zp = os.path.join(cache, "glove.6B.zip")
+    if not os.path.exists(zp):
+        url = "https://huggingface.co/stanfordnlp/glove/resolve/main/glove.6B.zip"
+        print(f"downloading GloVe (~822MB, one-time) -> {zp}")
+        urllib.request.urlretrieve(url, zp)
+    print(f"extracting glove.6B.{dim}d.txt -> {cache}")
+    with zipfile.ZipFile(zp) as z:
+        z.extract(f"glove.6B.{dim}d.txt", cache)
+    return txt
+
+
+def build_pretrained(sentences, vec_path, cap):
+    """Restrict pretrained vectors (GloVe/fastText text format) to the corpus vocab, L2-normalize each row.
+    Returns [(word, vec)], dim. Off-domain words simply aren't in the vocab, so they don't contribute → abstain."""
+    freq = Counter()
+    for s in sentences:
+        freq.update(set(toks(s)))
+    vocab = set(w for w, _ in freq.most_common(cap))
+    out, dim = [], 0
+    with open(vec_path, encoding="utf-8") as f:
+        for line in f:
+            parts = line.rstrip().split(" ")
+            if len(parts) < 3 or parts[0] not in vocab:
+                continue                                       # first line of a fastText file is "count dim" → skipped
+            vec = np.asarray(parts[1:], dtype=np.float32)
+            if dim == 0:
+                dim = len(vec)
+            elif len(vec) != dim:
+                continue
+            n = float(np.linalg.norm(vec))
+            out.append((parts[0], vec / n if n > 0 else vec))
+    return out, dim
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--min-len", type=int, default=20, help="drop passages shorter than this (chars)")
-    ap.add_argument("--dim", type=int, default=64, help="embedding dim (0 = lexical only, no wordvec.txt)")
+    ap.add_argument("--dim", type=int, default=64, help="0 = lexical only (no wordvec.txt); >0 = build vectors "
+                    "(SVD dim for --corpus-vectors; ignored for pretrained, which uses --glove-dim)")
     ap.add_argument("--vocab-cap", type=int, default=4000)
+    ap.add_argument("--corpus-vectors", action="store_true",
+                    help="use corpus-derived PPMI+SVD vectors instead of the default pretrained GloVe")
+    ap.add_argument("--pretrained", help="pretrained word vectors file (GloVe/fastText text format); "
+                    "default: auto-fetch GloVe")
+    ap.add_argument("--glove-dim", type=int, default=300, choices=[50, 100, 200, 300],
+                    help="GloVe dimension to auto-fetch when no --pretrained given (default 300)")
     ap.add_argument("--no-split", action="store_true", help="treat each line as one passage (don't split sentences)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -92,14 +144,20 @@ def main():
     print(f"knowledge.tsv: {len(passages)} passages -> {a.out}/knowledge.tsv")
 
     if a.dim > 0:
-        vecs, k = build_wordvec(passages, a.dim, a.vocab_cap)
+        if a.corpus_vectors:
+            vecs, k = build_wordvec(passages, a.dim, a.vocab_cap)
+            method = "PPMI+SVD over corpus"
+        else:                                                  # DEFAULT: pretrained GloVe, restricted to corpus vocab
+            vpath = a.pretrained or ensure_glove(a.glove_dim)
+            vecs, k = build_pretrained(passages, vpath, a.vocab_cap)
+            method = f"pretrained {os.path.basename(vpath)}"
         if vecs:
             with open(os.path.join(a.out, "wordvec.txt"), "w", encoding="utf-8") as f:
                 for word, vec in vecs:
                     f.write(word + " " + " ".join(f"{x:.5f}" for x in vec) + "\n")
-            print(f"wordvec.txt: {len(vecs)} words x {k}d (PPMI+SVD) -> {a.out}/wordvec.txt")
+            print(f"wordvec.txt: {len(vecs)} words x {k}d ({method}) -> {a.out}/wordvec.txt")
         else:
-            print("wordvec: corpus too small for vectors; lexical grounding only")
+            print("wordvec: no vectors built (corpus too small / no vocab overlap); lexical grounding only")
 
 
 if __name__ == "__main__":

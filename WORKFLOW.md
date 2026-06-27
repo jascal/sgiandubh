@@ -48,15 +48,24 @@ abstain. Built from the corpus text alone (no model). Routing at serve time: **f
 
 ## Stage 2.6 — grounding (optional, the publishing win)
 ```bash
-python tools/build_grounding.py --corpus knowledge.txt --out package           # knowledge.tsv + wordvec.txt
-python tools/build_grounding.py --corpus knowledge.txt --out package --dim 0    # lexical only (no numpy/scipy)
+python tools/build_grounding.py --corpus knowledge.txt --out package                   # GloVe (default) + knowledge.tsv
+python tools/build_grounding.py --corpus knowledge.txt --out package --corpus-vectors  # PPMI+SVD over this corpus
+python tools/build_grounding.py --corpus knowledge.txt --out package --dim 0           # lexical only (no numpy/scipy)
 ```
 Attaches the best-matching passage from the owner's **own content** (verbatim + section) to EVERY answer — faithful
-and generative alike — so each answer is grounded in their material, not just labeled. Built from the corpus text
-alone (no model): `wordvec.txt` holds corpus-derived word embeddings (PPMI + SVD over the corpus), so the server
-grounds by **meaning** (cosine) and falls back to lexical word-overlap when no vectors are shipped. The embeddings
-are *data*, not a model — the runtime stays model-free. Vectors need numpy+scipy at build time (`--dim 0` skips
-them); quality scales with corpus size, and pretrained vectors (same file format) are a drop-in upgrade.
+and generative alike — so each answer is grounded in their material, not just labeled. The runtime is model-free
+(the embeddings are *data*): the server averages `wordvec.txt` for passage/query vectors, grounds by **meaning**
+(cosine), and falls back to lexical word-overlap when no vectors are shipped.
+
+**Default: pretrained GloVe** (auto-fetched once to `~/.cache/sgiandubh`, restricted to the corpus vocab). Pretrained
+vectors share one well-calibrated semantic space, so cosines mean something — that's what makes off-domain queries
+**abstain** and in-domain citations land on the **right** passage. `--corpus-vectors` keeps the older PPMI+SVD path
+(no download, but noisy on small corpora and per-spoke-incompatible — off-domain leaks). `--pretrained <file>` uses a
+specific vectors file; `--dim 0` skips vectors (no numpy/scipy).
+> Changing the vector source changes the cosine scale, so the abstain gates (`--answer-cos` / `--answer-margin`,
+> Stage 4) should be **recalibrated on a representative test set** when you switch — don't tune them to a small corpus.
+> Ceiling: mean-pooled word vectors have a similarity floor; a sentence-embedding model would separate better but would
+> need a model at query time (breaking model-free runtime), so GloVe is the deliberate sweet spot.
 
 ## Stage 3 — build (sgiandubh)
 ```bash
