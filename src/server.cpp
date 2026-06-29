@@ -49,7 +49,7 @@ static double g_tau = 0.25; // faithful-match threshold (lexical Jaccard) — be
 static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
 
 // Grounding: the owner's corpus passages, so every answer can carry the verbatim source it's supported by.
-struct Passage { std::string section, text; std::set<std::string> w; std::vector<float> vec; };
+struct Passage { std::string id, section, text; std::set<std::string> w; std::vector<float> vec; };
 static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (optional)
 static std::unordered_map<std::string, std::vector<float>> g_wordvec; // corpus word embeddings (package/wordvec.txt)
 static int g_dim = 0;                      // embedding dim (>0 once wordvec.txt is loaded → cosine grounding)
@@ -87,6 +87,15 @@ static double jaccard(const std::set<std::string>& a, const std::set<std::string
     size_t inter = 0;
     for (const auto& x : a) if (b.count(x)) inter++;
     return (double)inter / (double)(a.size() + b.size() - inter);
+}
+
+// The machine handle of a citation: a section is "id · Facet" (e.g. "norm:fence_i_op · Zifencei"); the id is the part
+// before the middle dot — a stable key an LLM/agent can pass to /lookup to fetch this exact passage. No dot → whole string.
+static std::string cite_id(const std::string& section) {
+    auto dot = section.find("\xC2\xB7");                       // UTF-8 middle dot (·)
+    std::string s = (dot == std::string::npos) ? section : section.substr(0, dot);
+    size_t e = s.find_last_not_of(' ');
+    return (e == std::string::npos) ? s : s.substr(0, e + 1);
 }
 
 // Corpus word embeddings (package/wordvec.txt: `word v0 .. vD`). Optional — enables cosine grounding.
@@ -134,6 +143,7 @@ static void load_knowledge(const std::string& path) {
         if (tab == std::string::npos) continue;
         Passage p;
         p.section = line.substr(0, tab);
+        p.id = cite_id(p.section);                              // the callable handle (the slug before "·")
         p.text = line.substr(tab + 1);
         p.w = words(p.text);
         if (p.w.empty()) continue;
@@ -290,6 +300,7 @@ struct Answer {
     std::string content;   // rendered markdown (default format)
     std::string body;      // the answer text alone (no provenance)
     std::string citation;  // section / rule id / source label ("" if none)
+    std::string citation_id; // the machine handle (slug before "·") — an agent passes it to /lookup to refetch this source
     std::string passage;   // the supporting passage it's grounded in ("" if none / the answer IS the passage)
     std::string kind;      // distilled | retrieved | generated | abstain
     std::string route;     // provenance tier (RETRIEVED|SELECTED|COMPOSED) for a distilled answer ("" if n/a)
@@ -357,6 +368,7 @@ static Answer answer(const std::string& user) {
     // Prefer the grounding passage's section, but only if it HAS one — otherwise keep the item's own citation.
     // (A section-less grounding passage must not clobber a real item citation, e.g. logic's "Open Logic Project".)
     a.citation = (gp && !gp->section.empty()) ? gp->section : item_cite;
+    a.citation_id = cite_id(a.citation);                  // the callable handle for the cited source
     a.passage = gp ? gp->text : std::string();
     std::string prov_tier;   // per-answer provenance/confidence marker (debug + calibration): tier + fragile-link margin
     if (!a.route.empty() || a.margin < 1e8) {
@@ -405,6 +417,7 @@ static std::string structured_json(const Answer& a) {
     j["answer"] = a.body;
     j["kind"] = a.kind;
     if (!a.citation.empty()) j["citation"] = a.citation;
+    if (!a.citation_id.empty()) j["citation_id"] = a.citation_id;   // the handle: GET /lookup?id=<citation_id> refetches it
     if (!a.passage.empty()) j["source"] = a.passage;
     if (a.confidence >= 0) j["confidence"] = a.confidence;
     if (!a.route.empty()) j["route"] = a.route;          // provenance tier: RETRIEVED|SELECTED|COMPOSED
@@ -644,6 +657,26 @@ int main(int argc, char** argv) {
         out["matches"] = arr;
         res.set_content(out.dump(), "application/json");
     });
+    // Citation-as-handle (extension; not /v1): refetch the EXACT passage a citation points to, by its id. The expert
+    // answers with a citation_id (the slug, e.g. "norm:fence_i_op"); an LLM/agent reading the result calls this to
+    // verify / expand / quote the source verbatim. Exact-match (not the substring /retrieve), and bounded — only ids
+    // that exist resolve (404 otherwise), so it can't be used to fish outside the material.
+    auto lookup = [](const httplib::Request& q, httplib::Response& res) {
+        std::string id = q.has_param("id") ? q.get_param_value("id") : "";
+        if (id.empty() && !q.body.empty()) { try { id = json::parse(q.body).value("id", ""); } catch (...) {} }
+        const Passage* hit = nullptr;
+        for (const auto& p : g_knowledge) if (p.id == id) { hit = &p; break; }
+        json out;
+        out["object"] = "lookup";
+        out["id"] = id;
+        out["found"] = (hit != nullptr);
+        if (hit) { out["section"] = hit->section; out["passage"] = hit->text; }
+        res.status = hit ? 200 : 404;
+        res.set_content(out.dump(), "application/json");
+    };
+    svr.Get("/lookup", lookup);                               // GET /lookup?id=norm:fence_i_op   (curl/agent-friendly)
+    svr.Post("/lookup", lookup);                              // POST {"id":"norm:fence_i_op"}
+
     // Facet discovery (extension; not /v1) — the distinct facets you can filter /retrieve by. The section field is
     // "id · Facet" (e.g. "norm:lw_op · RV32I Base ISA"); the useful facet is the part after the middle dot, so we
     // surface those (deduped) rather than the thousands of per-item ids.
