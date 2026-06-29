@@ -8,14 +8,14 @@ it. Nothing in the pipeline is domain-specific — the corpus *is* the configura
    YOUR CORPUS              fieldrun (extractor, heavy, once)         sgiandubh (runtime, tiny, embedded)
    ───────────              ─────────────────────────────────        ──────────────────────────────────
    textbook / Q&A /   ──►   convert model → bundle                    dl2package: .dl  →  expert package
-   manual / dialogues       --export-logic-corpus → per-decision .dl  build.sh: souffle -o engine + g++ server
+   manual / dialogues       --export-logic-corpus → per-decision .dl  build.sh: g++ → server (C++ semiring decode)
    (+ citations)            (candidate / contrib / predicted)    ──►  ./sgiandubh  →  OpenAI /v1/chat/completions
 ```
 
 ## One command (the two demo experts)
 The whole staged pipeline below is wrapped for the riscv + logic demo experts — distilled, end to end, on a CPU box:
 ```bash
-# prereqs: souffle, g++, rust+cargo (builds the tokenizer FFI staticlib), python3+numpy+scipy, a built fieldrun, a model bundle. Logic corpus ships in corpora/;
+# prereqs: g++, rust+cargo (builds the tokenizer FFI staticlib), python3+numpy+scipy, a built fieldrun, a model bundle. Logic corpus ships in corpora/;
 # RISC-V needs norm-rules.json from a riscv-isa-manual release.
 BUNDLE=~/.cache/fieldrun/bundles/Qwen2.5-7B-Instruct/Qwen2.5-7B-Instruct \
 NORM_RULES=/path/to/norm-rules.json ./tools/build_experts.sh        # ONLY=logic|riscv to build one; STEPS=N for depth
@@ -80,14 +80,12 @@ specific vectors file; `--dim 0` skips vectors (no numpy/scipy).
 
 ## Stage 3 — build (sgiandubh)
 ```bash
-./build.sh                                   # souffle -g engine + g++  →  ONE binary (engine embedded), ~1.2 MB
-./build.sh --with-core                       # also union the ergo core reasoning KB into the engine (derive, don't just recall)
-CORE_DL=/path/to/ergo/core.dl ./build.sh     # ...from an explicit path (default: ../ergo/core.dl)
+./build.sh            # cargo (tokenizer FFI) + g++  →  ONE binary, no Soufflé, no spawn
 ```
-`--with-core` is opt-in: it reads ergo's *single* `core.dl` at build time into an ephemeral combined `.dl` under
-`build/` (gitignored, regenerated each build) — no committed copy. Off by default → the plain decode engine. (The
-shared reasoning rules are compiled in once; the per-expert structured-shadow *facts* are loaded like the decode facts.
-See `claymore/docs/core-reasoning-kb.md` and the `ergo` repo.)
+The per-decision decode is a ~15-line C++ semiring combine (`rosetta::decode_facts`: logit = Σ contrib; decide =
+argmax — `src/engine.dl` ported to C++), verified identical to the former embedded Soufflé engine. There is no Soufflé
+toolchain dependency. The Datalog *reasoning* path (ergo `core.dl`, the former `--with-core`) is retired — that role is
+now [rosetta](../rosetta)'s, whose certified cover sgiandubh consumes via `--rosetta-package` (see PACKAGE).
 
 ## Stage 4 — deploy
 ```bash
@@ -117,7 +115,8 @@ attach a supporting passage). Raise them to abstain more (precision), lower them
   the answer's components `{answer, kind, citation, source, confidence}`, so the app renders its own UI.
 - `--repl` — interactive stdin loop for local testing (no server): prints the answer + kind + confidence.
 - `GET /health` (alias `/healthz`) — readiness/liveness: `{model, engine, items, gram, grounding, knowledge_passages,
-  status}` (200 ok / 503 if the embedded engine failed to load). Matches claymore's `/health` so a hub can probe it.
+  status}` (`engine` = `"semiring-c++"`; always 200 — the decode is in-process, nothing to fail to load). Matches
+  claymore's `/health` so a hub can probe it.
 
 **Structured retrieval — NON-STANDARD extension** (deliberately *not* under `/v1`, which is reserved for the
 OpenAI-compatible surface above). There is no OpenAI endpoint for "return a set of matching passages", so this is a
@@ -142,7 +141,8 @@ stays a pristine drop-in and only callers that want aggregation touch the extens
                "facts": "<facts dir>" } ] }
 ```
 `<facts dir>/candidate.facts` (one candidate id per line) and `<facts dir>/contrib.facts`
-(`block <TAB> id <TAB> weight`) — the decision the compiled Soufflé engine re-derives as the certificate.
+(`block <TAB> id <TAB> weight`) — the decision the C++ semiring decode (`rosetta::decode_facts`) re-derives: `Σ block ==
+logit`, `argmax == decide`. `src/engine.dl` is the formal spec of that decode (the certificate), no longer compiled.
 `knowledge.tsv` (optional): `section <TAB> passage` — the owner's content, for grounding.
 `wordvec.txt` (optional): `word v0 .. vD` — corpus word embeddings; enables cosine (semantic) grounding.
 `gram/` (optional): the n-gram KB for the generative tail.
@@ -152,11 +152,10 @@ stays a pristine drop-in and only callers that want aggregation touch the extens
 - **Grounded** — every answer carries the verbatim passage from the owner's content it's supported by (+ section),
   matched semantically (corpus-derived embeddings, cosine) or lexically; `--require-citation` refuses anything it
   can't ground or cite.
-- **Auditable** — the answer is (or is certified by) a Datalog decision; `Σ block == logit`.
-- **Small & fast** — a few-MB native binary, microsecond decisions, no model/GPU at runtime.
+- **Auditable** — the answer is (or is certified by) the semiring decode; `Σ block == logit`, `argmax == decide`.
+- **Small & fast** — a few-MB native binary, microsecond decisions, no model/GPU/Soufflé at runtime.
 
 ## Roadmap (makes the generic feature richer)
 - `--steps` traces → multi-token generated answers (already assembled by the converter).
-- in-process libsouffle (drop the per-request spawn); log-semiring functor → `logprobs` (confidence + distractors).
 - **gram kernel** (n-gram + induction) → generalize past exact-match queries; **vocab-pruned tokenizer** → smaller.
-- fieldrun emitting the package + manifest directly (so Stage 2 disappears).
+- rosetta emitting the package + manifest directly (so Stage 2 disappears).

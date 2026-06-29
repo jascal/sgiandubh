@@ -2,7 +2,6 @@
 /tok_ffi/target/
 *.o
 *.cpp.bak
-souffle-compile-*
 # generated, domain-specific expert packages — may contain licensed source content; never commit
 /package_de/
 /package_ap/

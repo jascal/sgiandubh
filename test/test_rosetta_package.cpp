@@ -4,8 +4,11 @@
 // uncovered contexts ABSTAIN. Build+run:  ./test/run.sh
 #include "rosetta_package.h"
 #include <cassert>
+#include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
+#include <map>
 
 using rosetta::Ctx;
 using rosetta::Package;
@@ -66,7 +69,29 @@ int main() {
     assert(!p.serve(Ctx{500, 501}).has_value());
     assert(!p.serve(Ctx{}).has_value());
 
+    // --- decode_facts: the C++ semiring decode (engine.dl in C++) = logit(T)=Σ contrib; decide=argmax ---
+    {
+        namespace fs = std::filesystem;
+        const std::string dir = "/tmp/rosetta_decode_test";
+        fs::create_directories(dir);
+        { std::ofstream f(dir + "/candidate.facts"); f << "10\n20\n30\n"; }          // 30 has no contrib → logit 0
+        { std::ofstream f(dir + "/contrib.facts");                                   // 10 → 0.5+0.5=1.0, 20 → 2.0
+          f << "L0.attn\t10\t0.5\nL1.ffn\t10\t0.5\nL0.attn\t20\t2.0\n"; }
+        auto fd = rosetta::decode_facts(dir);
+        assert(fd.decide == 20);                                                     // argmax (2.0)
+        assert(fd.logits.size() == 3);                                               // a logit per candidate incl. contrib-less 30
+        std::map<int, double> got;
+        for (auto& kv : fd.logits) got[kv.first] = kv.second;
+        assert(std::abs(got[10] - 1.0) < 1e-9);
+        assert(std::abs(got[20] - 2.0) < 1e-9);
+        assert(std::abs(got[30] - 0.0) < 1e-9);
+        // missing dir / no candidates -> decide=-1, empty logits (the distilled tier then yields null logprobs)
+        auto none = rosetta::decode_facts("/tmp/rosetta_decode_does_not_exist");
+        assert(none.decide == -1 && none.logits.empty());
+        fs::remove_all(dir);
+    }
+
     std::remove(path.c_str());
-    std::printf("test_rosetta_package: OK (gate, compose, n-gram longest-suffix, abstain, citations)\n");
+    std::printf("test_rosetta_package: OK (gate, compose, n-gram longest-suffix, abstain, citations, decode_facts)\n");
     return 0;
 }

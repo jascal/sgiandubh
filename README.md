@@ -1,17 +1,18 @@
 # sgiandubh
 
 A *sgian-dubh* is the small concealed blade. This is the small, concealed expert: a **standalone, OpenAI-compatible
-server** for a **bounded domain expert** distilled out of a large model — compiled to native C++ over a
-[Soufflé](https://souffle-lang.github.io/) decision engine. **No model, no GPU, no [fieldrun](../fieldrun) at runtime.**
+server** for a **bounded domain expert** distilled out of a large model — a native C++ binary whose per-decision decode
+is a ~15-line **semiring combine** (`logit = Σ contrib`, `decide = argmax`; the formal spec is `src/engine.dl`, ported
+to C++ in `src/rosetta_package.h`). **No model, no GPU, no [fieldrun](../fieldrun), no Soufflé at runtime.**
 
 It answers everything in its material and **abstains** on everything else — by construction, not by a filter. Every
-answer is cited and reproducible from an auditable Datalog program. Tens of milliseconds, a few MB, runs anywhere.
+answer is cited and reproducible from an auditable decode. Tens of milliseconds, a few MB, runs anywhere.
 
 ## The two-stage pipeline
 ```
-fieldrun  (heavy, once)                         sgiandubh  (tiny, embedded)
-──────────────────────                          ─────────────────────────
-model → corpus → distil → EXPERT PACKAGE   →    souffle -o engine  +  OpenAI server
+fieldrun / rosetta  (heavy, once)               sgiandubh  (tiny, embedded)
+────────────────────────────────               ─────────────────────────
+model → corpus → distil → EXPERT PACKAGE   →    g++  +  OpenAI server
         (Datalog facts + n-gram/induction              ↓
          + citations + decode rules)            one small native binary, serves /v1/chat/completions
 ```
@@ -26,20 +27,20 @@ used once, offline, to manufacture the expert; sgiandubh ships without it.
 
 ## Runtime loop
 1. **match** the query to the item set (lexical now; embeddings later). Below threshold → **abstain** (the bound).
-2. **decide** by running the compiled Datalog engine on the item's facts (`Σ contrib`, `argmax` — the tropical decode).
+2. **decide** by the C++ semiring decode of the item's facts (`Σ contrib`, `argmax` — the tropical decode).
 3. reply in OpenAI shape, with the **citation**. (Planned: the log-sum-exp ⊕ as a functor → calibrated confidence +
    distractor mass on the standard `logprobs` field.)
 
 ## Build & run
 ```bash
-./build.sh                              # souffle -g engine + g++ → ONE binary (engine embedded, ~1.2 MB)
-./build/sgiandubh package 8080          # OpenAI server; no model, no GPU, no spawn
+./build.sh                              # cargo (tokenizer FFI) + g++ → ONE binary, no spawn
+./build/sgiandubh package 8080          # OpenAI server; no model, no GPU, no Soufflé
 curl localhost:8080/v1/chat/completions -d '{"messages":[{"role":"user","content":"smallest unit of an organism?"}]}'
 ```
 Answers in-scope come back with a citation and `logprobs` (the candidate distribution = confidence + distractor
 mass); off-scope abstains.
-Needs `souffle` (with compiled-mode headers — see fieldrun `SOUFFLE.md` §1.1) and `g++` (C++17). Header deps
-(`cpp-httplib`, `nlohmann/json`) vendored in `third_party/`.
+Needs `g++` (C++17) and `rust`/`cargo` (builds the tokenizer FFI staticlib). Header deps (`cpp-httplib`,
+`nlohmann/json`) vendored in `third_party/`.
 
 ## Why small & fast
 The model cost was paid once, at extraction. Serving is a lexical match + a **native semiring combine** over a handful
@@ -54,12 +55,14 @@ model it came from.
 3. **abstain** — out of domain (vocab-overlap gate fails) → refuses, by construction.
 
 ## Status
-Working: embedded in-process engine (one ~1.3 MB binary, no spawn; 1-ULP faithful); cite + abstain; **`logprobs`**
+Working: in-process C++ semiring decode (no Soufflé, no spawn; verified identical to the former embedded engine,
+max |Δlogprob| ~3e-6); cite + abstain; **`logprobs`**
 (confidence + distractor mass); **SSE streaming**; the **gram kernel** generative fallback (`tools/build_gram.py`);
 generic `tools/dl2package.py` (.dl → package). The full OpenAI surface — `/v1/models`, `/v1/chat/completions`
 (streaming + non-streaming), logprobs — is in place, and the runtime is tokenizer-free (it works at the text level).
-See [WORKFLOW.md](./WORKFLOW.md). Next: consuming fieldrun's real emitted package (the end-to-end showcase) and the
-push-button workflow (fieldrun token-text labels + `dl2package` corpus mode, to drop the hand-written manifest).
+See [WORKFLOW.md](./WORKFLOW.md). **Direction (the rosetta convergence):** sgiandubh becomes a *pure* thin server +
+REPL and [rosetta](../rosetta) becomes the sole builder — sgiandubh consumes a finished package and builds nothing.
+The bigger picture and the migration plan live in [`rosetta/CONVERGENCE.md`](../rosetta/CONVERGENCE.md).
 
 ## Licence note
 Code: see `LICENSE`. The `package/` demo facts are hand-built from OpenStax Anatomy & Physiology 2e (CC BY-NC-SA) — a
