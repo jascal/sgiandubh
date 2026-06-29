@@ -530,7 +530,9 @@ int main(int argc, char** argv) {
     if (g_rosetta_pkg) {  // --- the rosetta→sgiandubh convergence runtime: serve a rosetta expert package, host-side ---
         // No souffle engine, no per-item index.json: load manifest.json (the tiered cover) + the model's BPE tokenizer,
         // then serve queries: tokenize → trusted idioms → gated n-grams → ABSTAIN (port of rosetta/py/serve_package.py).
-        rosetta::Package pk = rosetta::Package::load(g_pkg + "/manifest.json");
+        rosetta::Package pk;
+        try { pk = rosetta::Package::load(g_pkg + "/manifest.json"); }
+        catch (const std::exception& e) { fprintf(stderr, "sgiandubh: %s\n", e.what()); return 1; }
         Tokenizer* tok = tk_new((g_pkg + "/bundle.tokenizer.json").c_str());
         if (!tok) { fprintf(stderr, "sgiandubh: --rosetta-package needs %s/bundle.tokenizer.json\n", g_pkg.c_str()); return 1; }
         fprintf(stderr, "sgiandubh rosetta-package: %d rules (%zu trusted idioms, W=%d) — type a query; blank/Ctrl-D to exit.\n",

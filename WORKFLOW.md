@@ -15,7 +15,7 @@ it. Nothing in the pipeline is domain-specific — the corpus *is* the configura
 ## One command (the two demo experts)
 The whole staged pipeline below is wrapped for the riscv + logic demo experts — distilled, end to end, on a CPU box:
 ```bash
-# prereqs: souffle, g++, python3+numpy+scipy, a built fieldrun, a model bundle. Logic corpus ships in corpora/;
+# prereqs: souffle, g++, rust+cargo (builds the tokenizer FFI staticlib), python3+numpy+scipy, a built fieldrun, a model bundle. Logic corpus ships in corpora/;
 # RISC-V needs norm-rules.json from a riscv-isa-manual release.
 BUNDLE=~/.cache/fieldrun/bundles/Qwen2.5-7B-Instruct/Qwen2.5-7B-Instruct \
 NORM_RULES=/path/to/norm-rules.json ./tools/build_experts.sh        # ONLY=logic|riscv to build one; STEPS=N for depth

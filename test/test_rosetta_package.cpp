@@ -51,6 +51,8 @@ int main() {
     assert(served(p, {200, 5, 6}, "trusted", "causal") == 70);
     // compose with an operand not in valmap -> skipped -> abstain
     assert(!p.serve(Ctx{200, 5, 99}).has_value());
+    // compose: ctx too short for the frame reach -> abstain, no out-of-bounds read
+    assert(!p.serve(Ctx{5, 6}).has_value());
 
     // n-gram longest-suffix: [...,11,12] -> 99 ; [...,x,12] (x!=11) -> 88
     assert(served(p, {0, 11, 12}, "gated", "observational") == 99);

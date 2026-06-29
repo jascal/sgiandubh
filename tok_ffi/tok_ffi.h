@@ -1,4 +1,7 @@
 // C FFI for the HF tokenizers Rust lib (libtok_ffi.a) — tokenize queries into the model's BPE token-id space.
+// Ownership: tk_new returns an OWNING handle; release it with exactly one tk_free (never free it otherwise, never
+// double-free). tk_encode/tk_decode BORROW the handle and it stays valid until tk_free. All entry points are
+// null-tolerant (null → null/-1). Not thread-safe per handle: don't call concurrently on the same Tokenizer*.
 #ifndef TOK_FFI_H
 #define TOK_FFI_H
 #ifdef __cplusplus

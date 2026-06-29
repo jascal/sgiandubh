@@ -9,6 +9,7 @@
 #include <fstream>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -51,7 +52,14 @@ struct Package {
 
     static Package load(const std::string& manifest_path) {
         std::ifstream f(manifest_path);
-        json m; f >> m;
+        if (!f) throw std::runtime_error("rosetta package: cannot open " + manifest_path);
+        json m;
+        try { f >> m; }
+        catch (const json::exception& e) {
+            throw std::runtime_error("rosetta package: malformed JSON in " + manifest_path + " — " + e.what());
+        }
+        if (!m.contains("rules") || !m["rules"].is_array())
+            throw std::runtime_error("rosetta package: " + manifest_path + " is missing a \"rules\" array");
         Package p;
         int maxlen = 0;
         for (auto& r : m["rules"])
@@ -59,21 +67,28 @@ struct Package {
                 maxlen = std::max(maxlen, (int)r["ctx"].size());
         p.W = maxlen;
         p.ngrams.assign(p.W + 1, {});
+        int ri = -1;
         for (auto& r : m["rules"]) {
+            ++ri;
             std::string kind = r.value("kind", std::string("ngram"));
             std::string cite = cite_of(r);
-            if (kind == "ngram") {
-                Ctx ctx = r["ctx"].get<Ctx>();
-                p.ngrams[ctx.size()][ctx] = {r["out"].get<int>(), r.value("basis", std::string("observational")), cite};
-            } else if (kind == "gate") {
-                Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
-                id.frame = imap(r["frame"]); id.slot = r["slot"].get<int>(); id.table = imap(r["table"]);
-                p.idioms.push_back(std::move(id));
-            } else if (kind == "compose") {
-                Idiom id; id.kind = "compose"; id.id = r.value("id", -1); id.cite = cite;
-                id.frame = imap(r["frame"]); id.k1 = r["operands"][0]; id.k2 = r["operands"][1];
-                id.valmap = imap(r["valmap"]); id.sum = imap(r["sum"]);
-                p.idioms.push_back(std::move(id));
+            try {                                               // a malformed/short-of-fields rule names itself, not a raw json throw
+                if (kind == "ngram") {
+                    Ctx ctx = r.at("ctx").get<Ctx>();
+                    p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")), cite};
+                } else if (kind == "gate") {
+                    Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
+                    id.frame = imap(r.at("frame")); id.slot = r.at("slot").get<int>(); id.table = imap(r.at("table"));
+                    p.idioms.push_back(std::move(id));
+                } else if (kind == "compose") {
+                    Idiom id; id.kind = "compose"; id.id = r.value("id", -1); id.cite = cite;
+                    id.frame = imap(r.at("frame")); id.k1 = r.at("operands").at(0); id.k2 = r.at("operands").at(1);
+                    id.valmap = imap(r.at("valmap")); id.sum = imap(r.at("sum"));
+                    p.idioms.push_back(std::move(id));
+                }                                               // unknown kinds are skipped (forward-compat with newer packages)
+            } catch (const json::exception& e) {
+                throw std::runtime_error("rosetta package: rule #" + std::to_string(ri) + " (" + kind + ") in "
+                                         + manifest_path + " is malformed — " + e.what());
             }
         }
         p.n_rules = (int)(p.idioms.size());
@@ -81,7 +96,16 @@ struct Package {
         return p;
     }
 
-    // The runtime decision: trusted idioms (frame-matched, in order) -> gated n-grams (longest suffix) -> ABSTAIN.
+    // Decide the next token for `ctx`. Priority encodes TRUST, not just specificity:
+    //   1) TRUSTED idioms (causal): gate/compose rules fieldrun causally CONFIRMED (perturb→output follows), so they
+    //      generalize out-of-distribution. They win even over a longer matching n-gram suffix — a matched idiom is
+    //      *vouched*, an n-gram is only *observed*.
+    //   2) GATED n-grams (observational): longest matching suffix wins (more context = more specific). Correlations that
+    //      passed a build-time support/determinism gate — reliable in-distribution, not vouched.
+    //   3) ABSTAIN (nullopt): no trusted idiom and no confident suffix → honest refusal (sgiandubh has no exact backstop).
+    // Decision.tier ∈ {"trusted","gated"} = which fired; Decision.basis ∈ {"causal", n-gram basis e.g. "observational"}
+    // = *why* it's believed — surfaced to the caller next to the provenance citation. All offset checks guard against
+    // ctx shorter than a rule's frame/operand reach, so a short context abstains rather than reading out of bounds.
     std::optional<Decision> serve(const Ctx& ctx) const {
         int n = (int)ctx.size();
         for (const auto& r : idioms) {                          // TRUSTED tier (causal) first

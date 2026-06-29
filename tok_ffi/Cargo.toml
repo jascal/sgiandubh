@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "tok_ffi"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]   # staticlib = linked into sgiandubh; rlib lets `cargo test` build the harness
 
 [dependencies]
 tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
