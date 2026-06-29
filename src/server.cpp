@@ -1,25 +1,26 @@
-// sgiandubh — a small, standalone, OpenAI-compatible server over a Soufflé-compiled bounded expert.
+// sgiandubh — a small, standalone, OpenAI-compatible server over a bounded expert. No model, no GPU, no fieldrun, no
+// Soufflé at runtime.
 //
-// No model, no GPU, no fieldrun at runtime. Per request it: (1) lexically matches the query against the extracted
-// decision set, (2) runs the EMBEDDED Datalog engine (in-process, no spawn) to derive the decision + per-candidate
-// logits, (3) replies in OpenAI /v1/chat/completions shape — grounded in the owner's content (the verbatim
-// supporting passage + section), with `logprobs` (confidence + distractor mass) — or abstains when out of scope.
-// With --require-citation it abstains on any answer it can't ground or cite (the strong regulated/high-stakes mode).
+// Per request it: (1) lexically matches the query against the extracted decision set, (2) derives the decision +
+// per-candidate logits via a pure-C++ semiring decode of the per-item facts (rosetta::decode_facts: logit = Σ contrib,
+// decide = argmax — engine.dl in C++), (3) replies in OpenAI /v1/chat/completions shape — grounded in the owner's
+// content (the verbatim supporting passage + section), with `logprobs` (confidence + distractor mass) — or abstains
+// when out of scope. With --require-citation it abstains on any answer it can't ground or cite (the regulated mode).
 //
-// The engine is the Soufflé-generated class for src/engine.dl, linked in (-D__EMBEDDED_SOUFFLE__). Built by build.sh.
+// The decode is the only "engine": a ~15-line semiring combine, verified identical to the former embedded Soufflé
+// engine (max |Δlogprob| ~3e-6, float32↔float64). The Datalog reasoning path (ergo core) is retired — that role is
+// rosetta's now. src/engine.dl remains as the reference spec decode_facts implements, but is not compiled.
 #include "httplib.h"
 #include "json.hpp"
 #include "gram.h"
-#include "rosetta_package.h"        // consume a rosetta expert package (the rosetta→sgiandubh convergence runtime)
+#include "rosetta_package.h"        // consume a rosetta expert package + the C++ semiring decode (the convergence runtime)
 #include "../tok_ffi/tok_ffi.h"     // HF tokenizers via FFI — BPE tokenize for the rosetta-package path
-#include "souffle/SouffleInterface.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <ctime>
 #include <fstream>
 #include <iostream>
-#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -45,8 +46,6 @@ static double g_tau = 0.25; // faithful-match threshold (lexical Jaccard) — be
                             // faithful answer (the old 0.12 let "De Morgan's law" wrongly match "excluded middle"). This and
                             // the gates below are DEFAULTS, overridable per-deployment via flags (--tau, --answer-cos, …) —
                             // tune them against a representative test set, not this small corpus.
-static souffle::SouffleProgram* g_prog = nullptr;
-static std::mutex g_engine_mu; // the embedded engine is a single stateful instance (purge/loadAll/run) — serialize it
 static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
 
 // Grounding: the owner's corpus passages, so every answer can carry the verbatim source it's supported by.
@@ -219,21 +218,13 @@ retrieve_many(const std::set<std::string>& qw, int k, double min_score, const st
     return hits;
 }
 
-// Run the EMBEDDED Datalog engine on a facts dir, in-process (no spawn). Returns the decided id + per-candidate logits.
-static Decision run_engine(const std::string& facts_dir) {
+// Decode a distilled item's per-decision facts → (decide, logits): the pure-C++ semiring decode (rosetta::decode_facts,
+// = engine.dl). logit = Σ contrib per candidate; decide = argmax. Per-candidate logits feed the host-side softmax below.
+static Decision decode_item(const std::string& facts_dir) {
+    rosetta::FactsDecode fd = rosetta::decode_facts(facts_dir);
     Decision r;
-    if (!g_prog) return r;
-    std::lock_guard<std::mutex> lk(g_engine_mu); // shared stateful engine → one decode at a time (microseconds)
-    g_prog->purgeInputRelations();
-    g_prog->purgeInternalRelations();
-    g_prog->purgeOutputRelations();
-    g_prog->loadAll(facts_dir);
-    g_prog->run();
-    for (auto& t : *g_prog->getRelation("decide")) { souffle::RamSigned v; t >> v; r.decide = (int)v; }
-    for (auto& t : *g_prog->getRelation("logit")) {
-        souffle::RamSigned id; souffle::RamFloat s; t >> id >> s;
-        r.logits.emplace_back((int)id, (double)s);
-    }
+    r.decide = fd.decide;
+    r.logits = std::move(fd.logits);
     return r;
 }
 
@@ -325,7 +316,7 @@ static Answer answer(const std::string& user) {
     a.kind = "abstain";
     if (hit && best >= g_tau) {
         item_cite = hit->citation;
-        Decision d = hit->facts.empty() ? Decision{} : run_engine(g_pkg + "/" + hit->facts);
+        Decision d = hit->facts.empty() ? Decision{} : decode_item(g_pkg + "/" + hit->facts);
         lp = logprobs_of(d, *hit);
         if (!hit->answer.empty()) body = hit->answer;                                  // distilled answer
         else if (!hit->options.empty() && d.decide >= 0 && d.decide < (int)hit->options.size())
@@ -559,9 +550,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    g_prog = souffle::ProgramFactory::newInstance("engine");
-    if (!g_prog) { fprintf(stderr, "sgiandubh: embedded engine 'engine' not found\n"); return 1; }
-
     std::ifstream f(g_pkg + "/index.json");
     if (!f) { fprintf(stderr, "sgiandubh: cannot open %s/index.json\n", g_pkg.c_str()); return 1; }
     json idx; f >> idx;
@@ -617,14 +605,14 @@ int main(int argc, char** argv) {
     auto health = [](const httplib::Request&, httplib::Response& res) {
         json m;
         m["object"] = "health";
-        m["status"] = g_prog ? "ok" : "down";
+        m["status"] = "ok";
         m["model"] = g_model;
-        m["engine"] = g_prog != nullptr;
+        m["engine"] = "semiring-c++";
         m["items"] = (int)g_items.size();
         m["gram"] = g_gram.loaded;
         m["grounding"] = g_knowledge.empty() ? "off" : (g_dim > 0 ? "vector" : "lexical");
         m["knowledge_passages"] = (int)g_knowledge.size();
-        res.status = g_prog ? 200 : 503;
+        res.status = 200;
         res.set_content(m.dump(), "application/json");
     };
     svr.Get("/health", health);

@@ -1,7 +1,11 @@
-// sgiandubh decode engine — the semiring combine, compiled by Soufflé to a native binary (`souffle -o`).
+// sgiandubh decode — the semiring combine, as the REFERENCE SPEC (this file is no longer compiled). The runtime decode
+// is this program ported to C++ in `src/rosetta_package.h` (rosetta::decode_facts), verified identical to the former
+// Soufflé build (max |Δlogprob| ~3e-6, float32↔float64). Soufflé is retired from sgiandubh; this stays as the
+// certificate's formal statement.
+//
 // Input facts (from the extracted expert package): the candidate set + each residual block's contribution.
-// Output: decide = argmax candidate (the (max,+) tropical decode). Swap the ⊕ to log-sum-exp (a functor) for
-// the full distribution / confidence — see README. This file is the *certificate* and, compiled, the *engine*.
+// Output: decide = argmax candidate (the (max,+) tropical decode). Swap the ⊕ to log-sum-exp for the full distribution
+// / confidence — the host does that softmax over `logit` for OpenAI `logprobs`.
 .decl candidate(t:number)
 .input candidate
 .decl contrib(block:symbol, t:number, w:float)

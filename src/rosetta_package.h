@@ -9,6 +9,8 @@
 #include <fstream>
 #include <map>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -135,5 +137,49 @@ struct Package {
         return std::nullopt;                                    // ABSTAIN
     }
 };
+
+// ---- the per-decision semiring decode: the C++ port of engine.dl, replacing the embedded Soufflé engine ----
+// A fieldrun-distilled expert ships, per decision, candidate.facts (one candidate token id per line) + contrib.facts
+// (block<ws>id<ws>weight). engine.dl is exactly: logit(T) = Σ contrib(_,T,w)  [⊗ = +, block contributions sum];
+// decide = argmax_T logit(T)  [⊕ = max, the T=0 tropical decode]. The per-candidate logits feed a host-side softmax
+// for OpenAI logprobs. This is that, in ~15 lines of pure arithmetic — no Soufflé, no model. Verified identical to the
+// former embedded Soufflé engine (max |Δlogprob| ~3e-6, float32↔float64); src/engine.dl is the formal spec.
+struct FactsDecode {
+    int decide = -1;                                 // argmax candidate (-1 if no candidates)
+    std::vector<std::pair<int, double>> logits;      // (candidate id, Σ contrib) for every candidate
+};
+
+inline FactsDecode decode_facts(const std::string& facts_dir) {
+    FactsDecode r;
+    std::set<int> cand;                              // logit is defined only for candidates (engine.dl: logit(T):-candidate(T)…)
+    {
+        std::ifstream f(facts_dir + "/candidate.facts");
+        std::string line;
+        while (std::getline(f, line)) {
+            std::istringstream ss(line);
+            int id;
+            if (ss >> id) cand.insert(id);
+        }
+    }
+    std::map<int, double> sum;                       // candidate id -> Σ w
+    {
+        std::ifstream f(facts_dir + "/contrib.facts");
+        std::string line;
+        while (std::getline(f, line)) {              // "block\tid\tw" (souffle .facts) — ws-tolerant
+            std::istringstream ss(line);
+            std::string block;
+            int id;
+            double w;
+            if (ss >> block >> id >> w && cand.count(id)) sum[id] += w;
+        }
+    }
+    double best = -1e300;
+    for (int id : cand) {                            // every candidate gets a logit (0 if it had no contrib)
+        double s = sum.count(id) ? sum[id] : 0.0;
+        r.logits.emplace_back(id, s);
+        if (s > best) { best = s; r.decide = id; }
+    }
+    return r;
+}
 }  // namespace rosetta
 #endif
