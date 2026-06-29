@@ -343,13 +343,14 @@ static Answer answer(const std::string& user) {
         cue.insert(aw.begin(), aw.end());
         gp = ground(cue);
     }
-    std::string prov;
+    // Footnote-numbered citation: an inline [n] marker on the answer + a "Sources" block mapping each number to its
+    // provenance. One source today (retrieval/faithful); the [n] scheme is what scales to multi-source / reasoning answers.
+    std::string src;
     if (gp)
-        prov = "\n\n\xF0\x9F\x93\x96 From the material" +
-               (gp->section.empty() ? std::string() : " (\xC2\xA7" + gp->section + ")") + ": \"" + gp->text + "\"";
+        src = (gp->section.empty() ? std::string("From the material") : "\xC2\xA7" + gp->section) + ": \"" + gp->text + "\"";
     else if (!item_cite.empty())
-        prov = "\n\n\xF0\x9F\x93\x96 " + std::string(is_retrieval ? "" : "Source: ") + item_cite;
-    bool cited = (gp != nullptr) || !item_cite.empty();
+        src = item_cite;
+    bool cited = !src.empty();
     if (g_require_citation && !cited) { a.content = a.body = ABSTAIN; a.kind = "abstain"; return a; }
 
     a.body = body;
@@ -365,7 +366,9 @@ static Answer answer(const std::string& user) {
         else snprintf(mb, sizeof mb, "margin %+.2f", a.margin);
         prov_tier = "\n\n[provenance: " + std::string(mb) + "]";
     }
-    a.content = body + prov + prov_tier + (is_generated && !gp ? "\n\n(generated from the material)" : "");
+    std::string sources = cited ? "\n\n\xF0\x9F\x93\x96 Sources:\n[1] " + src : std::string();
+    a.content = (cited ? body + " [1]" : body) + sources + prov_tier +
+                (is_generated && !gp ? "\n\n(generated from the material)" : "");
     a.lp = lp;
     if (!lp.is_null() && lp.contains("content") && !lp["content"].empty())
         a.confidence = std::exp(lp["content"][0].value("logprob", 0.0));
