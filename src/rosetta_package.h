@@ -143,7 +143,13 @@ struct Package {
 // (block<ws>id<ws>weight). engine.dl is exactly: logit(T) = Σ contrib(_,T,w)  [⊗ = +, block contributions sum];
 // decide = argmax_T logit(T)  [⊕ = max, the T=0 tropical decode]. The per-candidate logits feed a host-side softmax
 // for OpenAI logprobs. This is that, in ~15 lines of pure arithmetic — no Soufflé, no model. Verified identical to the
-// former embedded Soufflé engine (max |Δlogprob| ~3e-6, float32↔float64); src/engine.dl is the formal spec.
+// former embedded Soufflé engine (max |Δlogprob| ~3e-6 = the float32→float64 upgrade; src/engine.dl is the formal spec).
+//
+// Robustness contract (graceful by design — a thin runtime degrades to ABSTAIN, it does not abort):
+//   * missing / empty candidate.facts → no candidates → decide=-1, empty logits → the distilled tier yields null
+//     logprobs and the caller falls through to retrieval/abstain (the correct bounded behavior, not an error).
+//   * a malformed contrib line (not "block<ws>int<ws>float") fails the stream extract and is skipped.
+//   * a contrib for a non-candidate id is ignored (logit is defined only over candidates, per engine.dl).
 struct FactsDecode {
     int decide = -1;                                 // argmax candidate (-1 if no candidates)
     std::vector<std::pair<int, double>> logits;      // (candidate id, Σ contrib) for every candidate
