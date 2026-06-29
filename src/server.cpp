@@ -10,6 +10,8 @@
 #include "httplib.h"
 #include "json.hpp"
 #include "gram.h"
+#include "rosetta_package.h"        // consume a rosetta expert package (the rosetta→sgiandubh convergence runtime)
+#include "../tok_ffi/tok_ffi.h"     // HF tokenizers via FFI — BPE tokenize for the rosetta-package path
 #include "souffle/SouffleInterface.h"
 #include <algorithm>
 #include <cctype>
@@ -61,6 +63,7 @@ static bool g_require_citation = false;   // --require-citation: refuse any answ
 static bool g_answer_from_corpus = false; // --answer-from-corpus: return the best passage verbatim (retrieval-as-answer)
 static bool g_no_gram = false;            // --no-gram: disable the generative tail (faithful → retrieval → abstain only) — the strongest-trust config
 static bool g_repl = false;               // --repl: interactive stdin loop for local testing (no server)
+static bool g_rosetta_pkg = false;        // --rosetta-package: serve a rosetta expert package (manifest.json + tokenizer), host-side
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -511,6 +514,7 @@ int main(int argc, char** argv) {
         else if (a == "--answer-from-corpus") g_answer_from_corpus = true;
         else if (a == "--no-gram") g_no_gram = true;
         else if (a == "--repl") g_repl = true;
+        else if (a == "--rosetta-package") g_rosetta_pkg = true;
         // Tunable matching thresholds (defaults above are conservative; tune on a representative test set):
         else if (a == "--tau") fval(g_tau);                       // faithful lexical-Jaccard match
         else if (a == "--ground-cos") fval(g_cos_tau);            // min cosine to attach a supporting passage
@@ -522,6 +526,38 @@ int main(int argc, char** argv) {
     }
     g_pkg = pos.size() > 0 ? pos[0] : "package";
     int port = pos.size() > 1 ? std::stoi(pos[1]) : 8080;
+
+    if (g_rosetta_pkg) {  // --- the rosetta→sgiandubh convergence runtime: serve a rosetta expert package, host-side ---
+        // No souffle engine, no per-item index.json: load manifest.json (the tiered cover) + the model's BPE tokenizer,
+        // then serve queries: tokenize → trusted idioms → gated n-grams → ABSTAIN (port of rosetta/py/serve_package.py).
+        rosetta::Package pk;
+        try { pk = rosetta::Package::load(g_pkg + "/manifest.json"); }
+        catch (const std::exception& e) { fprintf(stderr, "sgiandubh: %s\n", e.what()); return 1; }
+        Tokenizer* tok = tk_new((g_pkg + "/bundle.tokenizer.json").c_str());
+        if (!tok) { fprintf(stderr, "sgiandubh: --rosetta-package needs %s/bundle.tokenizer.json\n", g_pkg.c_str()); return 1; }
+        fprintf(stderr, "sgiandubh rosetta-package: %d rules (%zu trusted idioms, W=%d) — type a query; blank/Ctrl-D to exit.\n",
+                pk.n_rules, pk.idioms.size(), pk.W);
+        char buf[512];
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            if (line.empty()) break;
+            unsigned ids[256];
+            int n = tk_encode(tok, line.c_str(), ids, 256);
+            if (n < 0) { printf("(tokenize error)\n"); continue; }
+            std::vector<int> ctx(ids, ids + n);
+            auto d = pk.serve(ctx);
+            if (d) {
+                int m = tk_decode(tok, (unsigned)d->answer, buf, sizeof buf);
+                std::string ans = m > 0 ? std::string(buf, m) : ("#" + std::to_string(d->answer));
+                printf("%s   [%s/%s]  cite: %s\n", ans.c_str(), d->tier.c_str(), d->basis.c_str(),
+                       d->citation.empty() ? "(none)" : d->citation.c_str());
+            } else {
+                printf("(abstain — not in this expert's material)\n");
+            }
+        }
+        tk_free(tok);
+        return 0;
+    }
 
     g_prog = souffle::ProgramFactory::newInstance("engine");
     if (!g_prog) { fprintf(stderr, "sgiandubh: embedded engine 'engine' not found\n"); return 1; }
