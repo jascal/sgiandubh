@@ -28,13 +28,15 @@ export LIBRARY_PATH="$HOME/.local/lib:${LIBRARY_PATH:-}"
 # -isystem (not -I) for vendored + souffle headers so their warnings don't drown ours; -Wall/-Wextra only on OUR code.
 CXXFLAGS="-std=c++17 $MODE -D__EMBEDDED_SOUFFLE__ -Wno-deprecated-declarations -isystem third_party -isystem $HOME/.local/include"
 
-echo "[1/3] souffle -g -> engine C++ class"
+echo "[1/4] cargo -> tokenizer FFI staticlib (HF tokenizers; powers the --rosetta-package runtime's BPE tokenize)"
+( cd tok_ffi && cargo build --release )
+echo "[2/4] souffle -g -> engine C++ class"
 souffle -g build/engine.cpp "$ENGINE"
-echo "[2/3] g++ -> objects (engine: generated, warnings off; server: -Wall -Wextra)"
+echo "[3/4] g++ -> objects (engine: generated, warnings off; server: -Wall -Wextra)"
 g++ $CXXFLAGS -w -c build/engine.cpp -o build/engine.o
 g++ $CXXFLAGS -Wall -Wextra -c src/server.cpp -o build/server.o
-echo "[3/3] g++ -> link"
-g++ $CXXFLAGS build/engine.o build/server.o -o build/sgiandubh -lpthread -lsqlite3 -lz
+echo "[4/4] g++ -> link (+ the tokenizer FFI staticlib)"
+g++ $CXXFLAGS build/engine.o build/server.o tok_ffi/target/release/libtok_ffi.a -o build/sgiandubh -lpthread -lsqlite3 -lz -ldl -lm
 
 # compile_commands.json for clang-tidy / LSP (server.cpp is the unit tooling cares about). Absolute paths → gitignored.
 printf '[{"directory": "%s", "file": "src/server.cpp", "command": "g++ %s -Wall -Wextra -c src/server.cpp"}]\n' \

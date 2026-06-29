@@ -1,4 +1,5 @@
 /build/
+/tok_ffi/target/
 *.o
 *.cpp.bak
 souffle-compile-*
