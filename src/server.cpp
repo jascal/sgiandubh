@@ -51,17 +51,24 @@ static Gram g_gram; // generative fallback (n-gram + induction), loaded if packa
 // Grounding: the owner's corpus passages, so every answer can carry the verbatim source it's supported by.
 struct Passage { std::string id, section, text; std::set<std::string> w; std::vector<float> vec; };
 static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (optional)
+// Strategy tables (package/strategy.tsv, built by ergo/strategy.dl): query-handling intents materialized at BUILD, so
+// the runtime routes "how many / list" to the right aggregate DECLARATIVELY — no query heuristics in the server.
+// These tables (like g_knowledge / g_wordvec) are populated ONCE at startup and only read while serving — no locking.
+static std::unordered_map<std::string, std::string> g_cues;            // cue word -> intent (the i18n-able lexicon, DATA)
+// The uniform answer table: intent -> [(entity, passage-id)]. A query of <intent> that NAMES <entity> is answered by
+// <passage-id>. Count/list/define are just different intents — one lookup, no per-kind code (REASONING.md).
+static std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> g_answers;
 static std::unordered_map<std::string, std::vector<float>> g_wordvec; // corpus word embeddings (package/wordvec.txt)
 static int g_dim = 0;                      // embedding dim (>0 once wordvec.txt is loaded → cosine grounding)
 static double g_ground_tau = 0.10;        // min lexical overlap to ground (lexical fallback)
 static double g_cos_tau = 0.35;           // min cosine to ground (attach a supporting passage)
-static double g_answer_cos_tau = 0.60;    // stricter bar to RETURN a passage AS the answer (retrieval-answer)
+static double g_answer_cos_tau = 0.70;    // stricter bar to RETURN a passage AS the answer (retrieval-answer)
 static double g_answer_lex_tau = 0.18;    //   "  (lexical fallback)
-static double g_answer_margin = 0.25;     // top match must beat the mean cosine by this (off-domain = flat → reject)
-// cos/margin calibrated against rosetta examples/riscv/testset.jsonl (pack.score_retrieval): 0.50/0.20 leaked 33%
-// off-domain; 0.60/0.25 → 0% leak at 100% in-domain recall (coverage carries recall at the stricter cosine bar).
-// Small testset (18 q) — directional + safe-side (stricter = more abstaining, the bounded-expert bias); --answer-cos
-// / --answer-margin remain exposed for per-deployment tuning against a larger set.
+static double g_answer_margin = 0.30;     // top match must beat the mean cosine by this (off-domain = flat → reject)
+// cos/margin calibrated against rosetta examples/riscv/testset.jsonl (pack.score_retrieval): rules-only wanted
+// 0.60/0.25, but the richer prose corpus reintroduced a cosine near-collision ("boiling point" ↔ "floating point"),
+// so 0.70/0.30 → 0% off-domain leak at 100% in-domain recall + precision (28 q). Small set — directional + safe-side
+// (stricter = more abstaining, the bounded-expert bias); --answer-cos / --answer-margin stay exposed for tuning.
 static double g_answer_cov_tau = 0.60;    // OR accept on lexical term-COVERAGE: a passage holding this fraction of the
                                           // query's content-words is a strong match even if mean-pooled cosine is low
 static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
@@ -74,7 +81,10 @@ static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
         "the","is","are","was","were","be","been","a","an","of","to","in","on","for","and","or","but",
         "what","which","who","how","why","when","where","do","does","did","you","your","it","its","that",
-        "this","these","those","with","as","at","by","from","about","can","could","would","should","i","we"};
+        "this","these","those","with","as","at","by","from","about","can","could","would","should","i","we",
+        // common function words (so the domain gate isn't satisfied by ubiquitous corpus words like "there")
+        "there","here","into","than","then","they","them","their","such","also","not","only","other","will",
+        "may","must","has","have","had","being","over","under","out","up","each","both","some","any","all","more","most"};
     return S.count(w) > 0;
 }
 static std::set<std::string> words(const std::string& s) {
@@ -164,6 +174,44 @@ static void load_knowledge(const std::string& path) {
         if (p.w.empty()) continue;
         p.vec = embed(p.w);  // precompute the passage embedding (empty if no vectors loaded)
         g_knowledge.push_back(std::move(p));
+    }
+}
+// Strategy tables (package/strategy.tsv): "cue <word> <intent>" + "route <intent> <kind> <arg>". Optional — built by
+// the ergo strategy tier (rosetta). Lets the runtime route a query's intent to the right aggregate without any
+// natural-language logic of its own (the cue lexicon IS the language, and it lives here as data).
+static std::string lower(const std::string& s) {
+    std::string o(s.size(), '\0');
+    std::transform(s.begin(), s.end(), o.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+    return o;
+}
+// Does `entity` occur in `ql` as whole word(s) — bounded by non-alphanumerics, not inside a larger word? A trailing
+// plural "s" is tolerated (so the entity "instruction" matches "instructions" but NOT "instructional"); "m extension"
+// matches "…the m extension." but not "harm extension".
+static bool phrase_in(const std::string& ql, const std::string& entity) {
+    if (entity.empty()) return false;
+    for (size_t p = ql.find(entity); p != std::string::npos; p = ql.find(entity, p + 1)) {
+        bool lok = (p == 0) || !std::isalnum((unsigned char)ql[p - 1]);
+        size_t e = p + entity.size();
+        if (e < ql.size() && (ql[e] == 's' || ql[e] == 'S')) e++;     // tolerate an English plural suffix
+        bool rok = (e >= ql.size()) || !std::isalnum((unsigned char)ql[e]);
+        if (lok && rok) return true;
+    }
+    return false;
+}
+// Load package/strategy.tsv (built by rosetta strategy_tables + ergo/strategy.dl). Two row shapes:
+//   cue    <word>   <intent>             intent lexicon  (word/intent lowercased to match the lowercased query)
+//   answer <intent> <entity> <passage>   the uniform table; <entity> lowercased (matched as a substring of the query)
+static void load_strategy(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        std::istringstream ss(line);
+        std::string tag, a, b, c;
+        if (!std::getline(ss, tag, '\t')) continue;
+        if (tag == "cue" && std::getline(ss, a, '\t') && std::getline(ss, b)) g_cues[lower(a)] = b;
+        else if (tag == "answer" && std::getline(ss, a, '\t') && std::getline(ss, b, '\t') && std::getline(ss, c))
+            g_answers[a].push_back({lower(b), c});                // intent -> (entity, passage-id); entity lowercased
     }
 }
 // Best supporting passage for a cue (query + answer words): cosine over embeddings if loaded, else lexical Jaccard.
@@ -336,9 +384,45 @@ struct Answer {
     int ptoks = 0;
 };
 
-static Answer answer(const std::string& user) {
+// UNIFORM, table-driven strategy dispatch (package/strategy.tsv) — the de-special-cased redesign. The query's INTENT
+// is supplied by the caller (the orchestrating LLM's job) or inferred from the package's cue lexicon (the only natural
+// language in play, and it's data). Then ONE rule, identical for count / list / define / anything: among the answer
+// rows for that intent, return the passage whose ENTITY the query NAMES (longest match wins). The entity-must-appear
+// check IS the domain gate — "how many planets" names no known entity, so it falls through to retrieval → abstain.
+static const Passage* strategy_answer(const std::string& raw, const std::string& caller_intent) {
+    if (g_answers.empty()) return nullptr;
+    std::string ql;                                              // raw query, lowercased (entities are matched against it)
+    for (char ch : raw) ql += (char)std::tolower((unsigned char)ch);
+    std::set<std::string> intents;                              // the candidate intents to try
+    if (!caller_intent.empty()) {
+        intents.insert(caller_intent);                          // a caller-supplied intent is authoritative
+    } else {                                                    // else: EVERY intent whose cue word appears — not just the
+        std::string tok;                                        // first. "what is the total number of X" signals both
+        auto flush = [&] {                                      // define and count; the entity match below disambiguates.
+            if (!tok.empty()) { auto c = g_cues.find(tok); if (c != g_cues.end()) intents.insert(c->second); }
+            tok.clear();
+        };
+        for (char ch : ql) { if (std::isalnum((unsigned char)ch)) tok += ch; else flush(); }
+        flush();
+    }
+    const std::string* best_id = nullptr;                        // most specific named entity across all candidate intents
+    size_t blen = 0;
+    for (const auto& intent : intents) {
+        auto a = g_answers.find(intent);
+        if (a == g_answers.end()) continue;
+        for (const auto& row : a->second)                       // row = (entity, passage-id); longest named entity wins
+            if (row.first.size() > blen && phrase_in(ql, row.first)) { blen = row.first.size(); best_id = &row.second; }
+    }
+    if (!best_id) return nullptr;                                // query named no known entity → fall through (abstain)
+    for (const auto& p : g_knowledge) if (p.id == *best_id) return &p;
+    return nullptr;
+}
+
+static Answer answer(const std::string& user, const std::string& caller_intent = "") {
     static const std::string ABSTAIN = "That isn't covered in this material. Try rephrasing your question.";
     auto qw = words(user);
+    for (auto it = qw.begin(); it != qw.end();)                  // cue words are intent signals, not CONTENT — drop them
+        it = g_cues.count(*it) ? qw.erase(it) : std::next(it);   // from the content terms (inference uses raw tokens)
     double best = 0.0;
     const Item* hit = nullptr;
     for (const auto& it : g_items) {
@@ -361,6 +445,10 @@ static Answer answer(const std::string& user) {
         else body = (d.decide >= 0 ? "decide=" + std::to_string(d.decide) : "(engine error)");
         is_answer = true; a.kind = "distilled";
         a.route = hit->route; a.margin = hit->margin;   // carry the provenance tier + fragile-link margin
+    }
+    if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
+        const Passage* sp = strategy_answer(user, caller_intent);                       // uniform intent·entity → passage
+        if (sp) { body = sp->text; item_cite = sp->section; is_answer = true; is_retrieval = true; a.kind = "retrieved"; }
     }
     if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
         const Passage* gp = retrieve_answer(qw);                                        // retrieval-as-answer (strict + margin)
@@ -530,7 +618,7 @@ static void handle(const httplib::Request& req, httplib::Response& res, const st
     json body;
     try { body = json::parse(req.body); }
     catch (...) { res.status = 400; res.set_content("{\"error\":\"invalid json\"}", "application/json"); return; }
-    Answer a = answer(user_text(body));
+    Answer a = answer(user_text(body), body.value("intent", ""));   // caller may supply intent (LLM); else cue lexicon
     std::string content = render(a, wants_json(body));
     if (body.value("stream", false)) { stream_answer(res, route, content, a.lp, a.ptoks); return; }
     if (route == "anthropic") res.set_content(anthropic_message(content, a.ptoks).dump(), "application/json");
@@ -612,6 +700,7 @@ int main(int argc, char** argv) {
     g_gram.load(g_pkg + "/gram"); // optional generative fallback
     load_wordvec(g_pkg + "/wordvec.txt");      // optional corpus embeddings (enables cosine grounding)
     load_knowledge(g_pkg + "/knowledge.tsv");  // optional grounding passages (vectors computed here)
+    load_strategy(g_pkg + "/strategy.tsv");    // optional intent→aggregate routing (ergo strategy tier)
     const char* gmode = g_knowledge.empty() ? "off" : (g_dim > 0 ? "vector" : "lexical");
     const char* gram_state = g_no_gram ? "off(--no-gram)" : (g_gram.loaded ? "on" : "off");
     fprintf(stderr, "sgiandubh: %zu items · model=%s · embedded engine · gram-kernel=%s · grounding=%s%s%s%s · listening :%d\n",
@@ -619,6 +708,18 @@ int main(int argc, char** argv) {
             g_dim > 0 ? ("/" + std::to_string(g_dim) + "d").c_str() : "",
             g_answer_from_corpus ? " · retrieval-answer" : "",
             g_require_citation ? " · require-citation" : "", port);
+    if (!g_answers.empty()) {
+        size_t nans = 0, dangling = 0;
+        std::set<std::string> ids;
+        for (const auto& p : g_knowledge) ids.insert(p.id);
+        for (const auto& kv : g_answers)
+            for (const auto& row : kv.second) { nans++; if (!ids.count(row.second)) dangling++; }
+        fprintf(stderr, "sgiandubh: strategy table — %zu intent cues, %zu answer rows (uniform intent·entity → passage)\n",
+                g_cues.size(), nans);
+        if (dangling)                                          // a strategy row pointing at a missing passage = build/runtime drift
+            fprintf(stderr, "sgiandubh: WARNING — %zu strategy rows reference passage ids absent from knowledge.tsv "
+                            "(stale strategy.tsv? rebuild the package)\n", dangling);
+    }
     fprintf(stderr, "sgiandubh: thresholds  faithful-tau=%.2f  answer-cos=%.2f  answer-lex=%.2f  answer-margin=%.2f  ground-cos=%.2f  ground-lex=%.2f  (override via flags)\n",
             g_tau, g_answer_cos_tau, g_answer_lex_tau, g_answer_margin, g_cos_tau, g_ground_tau);
 
