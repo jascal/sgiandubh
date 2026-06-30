@@ -24,6 +24,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -51,6 +52,7 @@ static Gram g_gram; // generative fallback (n-gram + induction), loaded if packa
 // Grounding: the owner's corpus passages, so every answer can carry the verbatim source it's supported by.
 struct Passage { std::string id, section, text; std::set<std::string> w; std::vector<float> vec; };
 static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (optional)
+static std::unordered_map<std::string, const Passage*> g_by_id;  // id -> passage (O(1) lookup at ~100-document scale)
 // Strategy tables (package/strategy.tsv, built by ergo/strategy.dl): query-handling intents materialized at BUILD, so
 // the runtime routes "how many / list" to the right aggregate DECLARATIVELY — no query heuristics in the server.
 // These tables (like g_knowledge / g_wordvec) are populated ONCE at startup and only read while serving — no locking.
@@ -175,6 +177,8 @@ static void load_knowledge(const std::string& path) {
         p.vec = embed(p.w);  // precompute the passage embedding (empty if no vectors loaded)
         g_knowledge.push_back(std::move(p));
     }
+    g_by_id.reserve(g_knowledge.size());                          // index by id AFTER loading (pointers now stable —
+    for (const auto& p : g_knowledge) g_by_id.emplace(p.id, &p);  // the vector won't grow/reallocate again). O(1) lookup.
 }
 // Strategy tables (package/strategy.tsv): "cue <word> <intent>" + "route <intent> <kind> <arg>". Optional — built by
 // the ergo strategy tier (rosetta). Lets the runtime route a query's intent to the right aggregate without any
@@ -243,33 +247,66 @@ static const Passage* ground(const std::set<std::string>& cue, double cos_tau = 
 
 // Retrieve the best passage to return AS the answer, with a MARGIN gate: the top match must stand out from the field.
 // An off-domain query produces a flat, uniformly-mediocre cosine profile (no clear winner) → nullptr → abstain.
+// Per-shard partial of the retrieval scan (best-by-rank + cosine mean accumulator) — reduced across threads.
+struct RetrievePart {
+    const Passage* best = nullptr;
+    double brank = -2.0, bcos = -2.0, bcov = 0.0, sum = 0.0;
+    long n = 0;
+};
+
 static const Passage* retrieve_answer(const std::set<std::string>& qw) {
     if (g_knowledge.empty()) return nullptr;
     if (g_dim > 0) {
         std::vector<float> qv = embed(qw);                     // may be empty (no in-vocab query words) → lexical only
-        const Passage* best = nullptr;
-        double brank = -2.0, bcos = -2.0, bcov = 0.0, sum = 0.0;
-        int n = 0;
-        for (const auto& p : g_knowledge) {
-            double cos = -2.0;
-            if (!qv.empty() && (int)p.vec.size() == g_dim) {
-                cos = 0;
-                for (int i = 0; i < g_dim; i++) cos += (double)qv[i] * p.vec[i];
-                sum += cos; n++;
+        const size_t N = g_knowledge.size();
+        // Scan a contiguous shard [s,e) → its RetrievePart. The cosine scan is the per-query cost; at ~100-document
+        // scale (tens of thousands of passages) it is split across threads. Shards are processed in index order and the
+        // reduction uses strict '>', so the result is IDENTICAL to the serial scan regardless of thread count.
+        // The scan body calls only pure, read-only helpers (the dot product over p.vec/qv, and coverage() over the
+        // word sets) — no shared mutable state — so each shard runs lock-free; pt is written by exactly one thread.
+        auto scan = [&](size_t s, size_t e, RetrievePart& pt) {
+            for (size_t i = s; i < e; i++) {
+                const Passage& p = g_knowledge[i];
+                double cos = -2.0;
+                if (!qv.empty() && (int)p.vec.size() == g_dim) {
+                    cos = 0;
+                    const float* pv = p.vec.data();
+                    for (int j = 0; j < g_dim; j++) cos += (double)qv[j] * pv[j];
+                    pt.sum += cos; pt.n++;
+                }
+                double cov = coverage(qw, p.w);                // coverage dominates; cosine breaks ties (define vs mention)
+                double rank = cov + 0.4 * (cos > 0 ? cos : 0.0);
+                if (rank > pt.brank) { pt.brank = rank; pt.best = &p; pt.bcos = cos; pt.bcov = cov; }
             }
-            double cov = coverage(qw, p.w);
-            // HYBRID re-rank: coverage dominates (recall on term-heavy queries), cosine breaks ties toward the most
-            // semantically-relevant of the equally-covered passages (so a ubiquitous term picks the DEFINING rule, not
-            // an arbitrary mentioning one).
-            double rank = cov + 0.4 * (cos > 0 ? cos : 0.0);
-            if (rank > brank) { brank = rank; best = &p; bcos = cos; bcov = cov; }
+        };
+        unsigned T = std::thread::hardware_concurrency();
+        // ~4000 = a conservative break-even heuristic (not hardware-profiled): below it the thread spawn/join cost
+        // outweighs a ~4k×300d scan; the cap of 8 avoids oversubscription on many-core hosts. Tune if profiling warrants.
+        if (T < 2 || N < 4000) T = 1; else T = std::min<unsigned>(T, 8);
+        std::vector<RetrievePart> parts(T);
+        if (T == 1) {
+            scan(0, N, parts[0]);
+        } else {
+            std::vector<std::thread> ts;
+            size_t chunk = (N + T - 1) / T;
+            for (unsigned t = 0; t < T; t++) {
+                size_t s = (size_t)t * chunk, e = std::min(N, s + chunk);
+                if (s >= e) break;
+                ts.emplace_back([&scan, s, e, &parts, t] { scan(s, e, parts[t]); });
+            }
+            for (auto& th : ts) th.join();
         }
-        double mean = n ? sum / n : 0.0;
+        RetrievePart g;                                        // reduce in shard order (== serial tie-breaking)
+        for (const auto& pt : parts) {
+            g.sum += pt.sum; g.n += pt.n;
+            if (pt.brank > g.brank) { g.brank = pt.brank; g.best = pt.best; g.bcos = pt.bcos; g.bcov = pt.bcov; }
+        }
+        double mean = g.n ? g.sum / g.n : 0.0;
         // Accept on a strong SEMANTIC match (cosine clears its bar AND stands out from the field) OR a strong LEXICAL one
         // (most query terms present) — the lexical path rescues short/term-heavy in-domain queries the cosine floor drops,
         // while off-domain (low cosine AND low coverage) is still rejected.
-        bool ok = best && ((bcos >= g_answer_cos_tau && (bcos - mean) >= g_answer_margin) || bcov >= g_answer_cov_tau);
-        return ok ? best : nullptr;
+        bool ok = g.best && ((g.bcos >= g_answer_cos_tau && (g.bcos - mean) >= g_answer_margin) || g.bcov >= g_answer_cov_tau);
+        return ok ? g.best : nullptr;
     }
     return ground(qw, g_answer_cos_tau, g_answer_lex_tau);  // lexical fallback (jaccard is already discriminative)
 }
@@ -414,8 +451,8 @@ static const Passage* strategy_answer(const std::string& raw, const std::string&
             if (row.first.size() > blen && phrase_in(ql, row.first)) { blen = row.first.size(); best_id = &row.second; }
     }
     if (!best_id) return nullptr;                                // query named no known entity → fall through (abstain)
-    for (const auto& p : g_knowledge) if (p.id == *best_id) return &p;
-    return nullptr;
+    auto it = g_by_id.find(*best_id);                            // O(1) — scales to ~100 documents
+    return it != g_by_id.end() ? it->second : nullptr;
 }
 
 static Answer answer(const std::string& user, const std::string& caller_intent = "") {
@@ -710,10 +747,8 @@ int main(int argc, char** argv) {
             g_require_citation ? " · require-citation" : "", port);
     if (!g_answers.empty()) {
         size_t nans = 0, dangling = 0;
-        std::set<std::string> ids;
-        for (const auto& p : g_knowledge) ids.insert(p.id);
         for (const auto& kv : g_answers)
-            for (const auto& row : kv.second) { nans++; if (!ids.count(row.second)) dangling++; }
+            for (const auto& row : kv.second) { nans++; if (!g_by_id.count(row.second)) dangling++; }
         fprintf(stderr, "sgiandubh: strategy table — %zu intent cues, %zu answer rows (uniform intent·entity → passage)\n",
                 g_cues.size(), nans);
         if (dangling)                                          // a strategy row pointing at a missing passage = build/runtime drift
@@ -792,8 +827,8 @@ int main(int argc, char** argv) {
     auto lookup = [](const httplib::Request& q, httplib::Response& res) {
         std::string id = q.has_param("id") ? q.get_param_value("id") : "";
         if (id.empty() && !q.body.empty()) { try { id = json::parse(q.body).value("id", ""); } catch (...) {} }
-        const Passage* hit = nullptr;
-        for (const auto& p : g_knowledge) if (p.id == id) { hit = &p; break; }
+        auto it = g_by_id.find(id);                              // O(1) exact-match by handle
+        const Passage* hit = it != g_by_id.end() ? it->second : nullptr;
         json out;
         out["object"] = "lookup";
         out["id"] = id;
