@@ -42,6 +42,14 @@ mass); off-scope abstains.
 Needs `g++` (C++17) and `rust`/`cargo` (builds the tokenizer FFI staticlib). Header deps (`cpp-httplib`,
 `nlohmann/json`) vendored in `third_party/`.
 
+**Subset key (a slice of a large expert).** Restrict matching to the part of the package whose section/id contains a
+key — so one big expert can be referred into as several smaller ones. Per request: `{"key": "V Extension", …}` (also
+honored on `/retrieve`). Per instance: `--key "V Extension"` (the REPL respects it too). Off-slice queries abstain by
+construction, exactly like off-domain. The hub (claymore) sets this automatically from a spoke's configured `key`.
+
+**REPL rendering.** On an interactive terminal the `--repl` loop renders Markdown + inline TeX/MathML math to Unicode;
+piped output stays raw (TTY-gated).
+
 ## Why small & fast
 The model cost was paid once, at extraction. Serving is a lexical match + a **native semiring combine** over a handful
 of candidates — microseconds, MBs of RAM, no neural forward. Size lives in the *facts* (bounded by the material) plus a

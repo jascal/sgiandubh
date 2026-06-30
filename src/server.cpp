@@ -13,6 +13,7 @@
 #include "httplib.h"
 #include "json.hpp"
 #include "gram.h"
+#include "md_render.h"              // terminal markdown + TeX/MathML rendering for the REPL (identical copy in claymore)
 #include "rosetta_package.h"        // consume a rosetta expert package + the C++ semiring decode (the convergence runtime)
 #include "../tok_ffi/tok_ffi.h"     // HF tokenizers via FFI — BPE tokenize for the rosetta-package path
 #include <algorithm>
@@ -25,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -225,8 +227,20 @@ static void load_strategy(const std::string& path) {
             g_answers[a].push_back({lower(b), c});                // intent -> (entity, passage-id); entity lowercased
     }
 }
+// Subset key: address a SLICE of a large expert. A passage/item is in-subset when `key` is empty, or `key` occurs
+// (case-insensitively) in the field tested (its section / id / citation). Lets ONE big package be referred into as
+// several smaller experts — restricting responses to a subset of the content. Set per-instance with --key, or per
+// request with the `key` field (request wins); claymore forwards a spoke's configured `key` on every call.
+static std::string g_default_key;
+static bool key_match(const std::string& field, const std::string& key) {
+    if (key.empty()) return true;
+    auto low = [](const std::string& s) { std::string r; for (char c : s) r += (char)std::tolower((unsigned char)c); return r; };
+    return low(field).find(low(key)) != std::string::npos;
+}
+
 // Best supporting passage for a cue (query + answer words): cosine over embeddings if loaded, else lexical Jaccard.
-static const Passage* ground(const std::set<std::string>& cue, double cos_tau = -1, double lex_tau = -1) {
+static const Passage* ground(const std::set<std::string>& cue, double cos_tau = -1, double lex_tau = -1,
+                             const std::string& key = "") {
     if (cos_tau < 0) cos_tau = g_cos_tau;
     if (lex_tau < 0) lex_tau = g_ground_tau;
     if (g_dim > 0) {
@@ -235,7 +249,7 @@ static const Passage* ground(const std::set<std::string>& cue, double cos_tau = 
             const Passage* best = nullptr;
             double bs = cos_tau;
             for (const auto& p : g_knowledge) {
-                if ((int)p.vec.size() != g_dim) continue;
+                if ((int)p.vec.size() != g_dim || !key_match(p.section, key)) continue;
                 double s = 0;
                 for (int i = 0; i < g_dim; i++) s += (double)qv[i] * p.vec[i];
                 if (s > bs) { bs = s; best = &p; }
@@ -246,6 +260,7 @@ static const Passage* ground(const std::set<std::string>& cue, double cos_tau = 
     const Passage* best = nullptr;
     double bs = lex_tau;
     for (const auto& p : g_knowledge) {
+        if (!key_match(p.section, key)) continue;
         double s = jaccard(cue, p.w);
         if (s > bs) { bs = s; best = &p; }
     }
@@ -261,7 +276,7 @@ struct RetrievePart {
     long n = 0;
 };
 
-static const Passage* retrieve_answer(const std::set<std::string>& qw) {
+static const Passage* retrieve_answer(const std::set<std::string>& qw, const std::string& key = "") {
     if (g_knowledge.empty()) return nullptr;
     if (g_dim > 0) {
         std::vector<float> qv = embed(qw);                     // may be empty (no in-vocab query words) → lexical only
@@ -274,6 +289,7 @@ static const Passage* retrieve_answer(const std::set<std::string>& qw) {
         auto scan = [&](size_t s, size_t e, RetrievePart& pt) {
             for (size_t i = s; i < e; i++) {
                 const Passage& p = g_knowledge[i];
+                if (!key_match(p.section, key)) continue;          // subset key: ignore passages outside the slice
                 double cos = -2.0;
                 if (!qv.empty() && (int)p.vec.size() == g_dim) {
                     cos = 0;
@@ -315,7 +331,7 @@ static const Passage* retrieve_answer(const std::set<std::string>& qw) {
         bool ok = g.best && ((g.bcos >= g_answer_cos_tau && (g.bcos - mean) >= g_answer_margin) || g.bcov >= g_answer_cov_tau);
         return ok ? g.best : nullptr;
     }
-    return ground(qw, g_answer_cos_tau, g_answer_lex_tau);  // lexical fallback (jaccard is already discriminative)
+    return ground(qw, g_answer_cos_tau, g_answer_lex_tau, key);  // lexical fallback (jaccard is already discriminative)
 }
 
 // Retrieve-MANY: the structured-retrieval counterpart to retrieve_answer. Returns up to k passages scoring above a
@@ -324,7 +340,8 @@ static const Passage* retrieve_answer(const std::set<std::string>& qw) {
 // single-best retriever can't serve — aggregation belongs where the data + index live, not at the hub.
 // An EMPTY query with a section lists everything in that section (pure faceted enumeration).
 static std::vector<std::pair<const Passage*, double>>
-retrieve_many(const std::set<std::string>& qw, int k, double min_score, const std::string& section) {
+retrieve_many(const std::set<std::string>& qw, int k, double min_score, const std::string& section,
+              const std::string& key = "") {
     std::vector<std::pair<const Passage*, double>> hits;
     bool vec = g_dim > 0;
     std::vector<float> qv;
@@ -332,6 +349,7 @@ retrieve_many(const std::set<std::string>& qw, int k, double min_score, const st
     bool list_all = qw.empty();                       // no query → the section filter alone selects
     for (const auto& p : g_knowledge) {
         if (!section.empty() && p.section.find(section) == std::string::npos) continue;
+        if (!key_match(p.section, key)) continue;     // subset key: confine the listing to the slice
         double s;
         if (list_all) s = 1.0;
         else if (vec) {
@@ -433,7 +451,7 @@ struct Answer {
 // language in play, and it's data). Then ONE rule, identical for count / list / define / anything: among the answer
 // rows for that intent, return the passage whose ENTITY the query NAMES (longest match wins). The entity-must-appear
 // check IS the domain gate — "how many planets" names no known entity, so it falls through to retrieval → abstain.
-static const Passage* strategy_answer(const std::string& raw, const std::string& caller_intent) {
+static const Passage* strategy_answer(const std::string& raw, const std::string& caller_intent, const std::string& key = "") {
     if (g_answers.empty()) return nullptr;
     std::string ql;                                              // raw query, lowercased (entities are matched against it)
     for (char ch : raw) ql += (char)std::tolower((unsigned char)ch);
@@ -454,22 +472,30 @@ static const Passage* strategy_answer(const std::string& raw, const std::string&
     for (const auto& intent : intents) {
         auto a = g_answers.find(intent);
         if (a == g_answers.end()) continue;
-        for (const auto& row : a->second)                       // row = (entity, passage-id); longest named entity wins
-            if (row.first.size() > blen && phrase_in(ql, row.first)) { blen = row.first.size(); best_id = &row.second; }
+        for (const auto& row : a->second) {                     // row = (entity, passage-id); longest named entity wins
+            if (row.first.size() <= blen || !phrase_in(ql, row.first)) continue;
+            if (!key.empty()) {                                 // subset key: only entities whose passage is in-slice
+                auto pit = g_by_id.find(row.second);
+                if (pit == g_by_id.end() || !key_match(pit->second->section, key)) continue;
+            }
+            blen = row.first.size(); best_id = &row.second;
+        }
     }
     if (!best_id) return nullptr;                                // query named no known entity → fall through (abstain)
     auto it = g_by_id.find(*best_id);                            // O(1) — scales to ~100 documents
     return it != g_by_id.end() ? it->second : nullptr;
 }
 
-static Answer answer(const std::string& user, const std::string& caller_intent = "") {
+static Answer answer(const std::string& user, const std::string& caller_intent = "", const std::string& key = "") {
     static const std::string ABSTAIN = "That isn't covered in this material. Try rephrasing your question.";
+    const std::string ekey = key.empty() ? g_default_key : key;  // request key overrides the instance default (--key)
     auto qw = words(user);
     for (auto it = qw.begin(); it != qw.end();)                  // cue words are intent signals, not CONTENT — drop them
         it = g_cues.count(*it) ? qw.erase(it) : std::next(it);   // from the content terms (inference uses raw tokens)
     double best = 0.0;
     const Item* hit = nullptr;
     for (const auto& it : g_items) {
+        if (!key_match(it.id, ekey) && !key_match(it.citation, ekey)) continue;   // subset key: only items in the slice
         double s = jaccard(qw, words(it.question));
         if (s > best) { best = s; hit = &it; }
     }
@@ -491,14 +517,14 @@ static Answer answer(const std::string& user, const std::string& caller_intent =
         a.route = hit->route; a.margin = hit->margin;   // carry the provenance tier + fragile-link margin
     }
     if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
-        const Passage* sp = strategy_answer(user, caller_intent);                       // uniform intent·entity → passage
+        const Passage* sp = strategy_answer(user, caller_intent, ekey);                 // uniform intent·entity → passage
         if (sp) { body = sp->text; item_cite = sp->section; is_answer = true; is_retrieval = true; a.kind = "retrieved"; }
     }
     if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
-        const Passage* gp = retrieve_answer(qw);                                        // retrieval-as-answer (strict + margin)
+        const Passage* gp = retrieve_answer(qw, ekey);                                  // retrieval-as-answer (strict + margin)
         if (gp) { body = gp->text; item_cite = gp->section; is_answer = true; is_retrieval = true; a.kind = "retrieved"; }
     }
-    if (!is_answer && !g_no_gram && g_gram.loaded) {
+    if (!is_answer && !g_no_gram && g_gram.loaded && ekey.empty()) {   // gram is whole-corpus: skip it under a subset key
         auto toks = Gram::tokenize(user);
         std::vector<std::string> cont = g_gram.in_domain(toks) ? g_gram.generate(toks, 24) : std::vector<std::string>{};
         if (!cont.empty()) { body = detok(cont); is_answer = true; is_generated = true; a.kind = "generated"; }
@@ -510,7 +536,7 @@ static Answer answer(const std::string& user, const std::string& caller_intent =
         std::set<std::string> cue = qw;
         auto aw = words(body);
         cue.insert(aw.begin(), aw.end());
-        gp = ground(cue);
+        gp = ground(cue, -1, -1, ekey);
     }
     // Footnote-numbered citation: an inline [n] marker on the answer + a "Sources" block mapping each number to its
     // provenance. One source today (retrieval/faithful); the [n] scheme is what scales to multi-source / reasoning answers.
@@ -662,7 +688,7 @@ static void handle(const httplib::Request& req, httplib::Response& res, const st
     json body;
     try { body = json::parse(req.body); }
     catch (...) { res.status = 400; res.set_content("{\"error\":\"invalid json\"}", "application/json"); return; }
-    Answer a = answer(user_text(body), body.value("intent", ""));   // caller may supply intent (LLM); else cue lexicon
+    Answer a = answer(user_text(body), body.value("intent", ""), body.value("key", ""));   // intent + optional subset key
     std::string content = render(a, wants_json(body));
     if (body.value("stream", false)) { stream_answer(res, route, content, a.lp, a.ptoks); return; }
     if (route == "anthropic") res.set_content(anthropic_message(content, a.ptoks).dump(), "application/json");
@@ -675,7 +701,9 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         auto fval = [&](double& dst) { if (i + 1 < argc) dst = std::atof(argv[++i]); };
-        if (a == "--require-citation") g_require_citation = true;
+        auto sval = [&](std::string& dst) { if (i + 1 < argc) dst = argv[++i]; };
+        if (a == "--key") sval(g_default_key);                    // restrict THIS instance to a content subset (the slice)
+        else if (a == "--require-citation") g_require_citation = true;
         else if (a == "--answer-from-corpus") g_answer_from_corpus = true;
         else if (a == "--no-gram") g_no_gram = true;
         else if (a == "--repl") g_repl = true;
@@ -766,13 +794,14 @@ int main(int argc, char** argv) {
             g_tau, g_answer_cos_tau, g_answer_lex_tau, g_answer_margin, g_cos_tau, g_ground_tau);
 
     if (g_repl) {  // local testing: read queries from stdin, print answers (no server)
+        bool tty = isatty(fileno(stdout));                     // render markdown/TeX only for an interactive terminal
         fprintf(stderr, "sgiandubh REPL — type a query; blank line or Ctrl-D to exit.\n");
         std::string line;
         while (true) {
             fprintf(stderr, "\n> "); fflush(stderr);
             if (!std::getline(std::cin, line) || line.empty()) break;
             Answer a = answer(line);
-            printf("%s\n", a.content.c_str());
+            printf("%s\n", tty ? mdterm::render(a.content, true).c_str() : a.content.c_str());
             if (a.confidence >= 0) printf("  [kind=%s · confidence p≈%.2f]\n", a.kind.c_str(), a.confidence);
             else printf("  [kind=%s]\n", a.kind.c_str());
             fflush(stdout);
@@ -813,9 +842,11 @@ int main(int argc, char** argv) {
         json body; try { body = json::parse(q.body); } catch (...) { body = json::object(); }
         std::string query = body.value("query", "");
         std::string section = body.value("section", "");
+        std::string key = body.value("key", "");                 // subset key (request) — overrides the --key default
+        if (key.empty()) key = g_default_key;
         int k = body.value("k", 20);
         double min_score = body.value("min_score", g_dim > 0 ? g_cos_tau : g_ground_tau);
-        auto hits = retrieve_many(words(query), k, min_score, section);
+        auto hits = retrieve_many(words(query), k, min_score, section, key);
         json arr = json::array();
         for (const auto& h : hits)
             arr.push_back({{"section", h.first->section}, {"passage", h.first->text}, {"score", h.second}});
