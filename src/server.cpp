@@ -55,9 +55,13 @@ static std::unordered_map<std::string, std::vector<float>> g_wordvec; // corpus 
 static int g_dim = 0;                      // embedding dim (>0 once wordvec.txt is loaded → cosine grounding)
 static double g_ground_tau = 0.10;        // min lexical overlap to ground (lexical fallback)
 static double g_cos_tau = 0.35;           // min cosine to ground (attach a supporting passage)
-static double g_answer_cos_tau = 0.50;    // stricter bar to RETURN a passage AS the answer (retrieval-answer)
+static double g_answer_cos_tau = 0.60;    // stricter bar to RETURN a passage AS the answer (retrieval-answer)
 static double g_answer_lex_tau = 0.18;    //   "  (lexical fallback)
-static double g_answer_margin = 0.20;     // top match must beat the mean cosine by this (off-domain = flat → reject)
+static double g_answer_margin = 0.25;     // top match must beat the mean cosine by this (off-domain = flat → reject)
+// cos/margin calibrated against rosetta examples/riscv/testset.jsonl (pack.score_retrieval): 0.50/0.20 leaked 33%
+// off-domain; 0.60/0.25 → 0% leak at 100% in-domain recall (coverage carries recall at the stricter cosine bar).
+// Small testset (18 q) — directional + safe-side (stricter = more abstaining, the bounded-expert bias); --answer-cos
+// / --answer-margin remain exposed for per-deployment tuning against a larger set.
 static double g_answer_cov_tau = 0.60;    // OR accept on lexical term-COVERAGE: a passage holding this fraction of the
                                           // query's content-words is a strong match even if mean-pooled cosine is low
 static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
