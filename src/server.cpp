@@ -53,6 +53,7 @@ struct Passage { std::string id, section, text; std::set<std::string> w; std::ve
 static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (optional)
 // Strategy tables (package/strategy.tsv, built by ergo/strategy.dl): query-handling intents materialized at BUILD, so
 // the runtime routes "how many / list" to the right aggregate DECLARATIVELY — no query heuristics in the server.
+// These tables (like g_knowledge / g_wordvec) are populated ONCE at startup and only read while serving — no locking.
 static std::unordered_map<std::string, std::string> g_cues;            // cue word -> intent (the i18n-able lexicon, DATA)
 // The uniform answer table: intent -> [(entity, passage-id)]. A query of <intent> that NAMES <entity> is answered by
 // <passage-id>. Count/list/define are just different intents — one lookup, no per-kind code (REASONING.md).
@@ -178,6 +179,28 @@ static void load_knowledge(const std::string& path) {
 // Strategy tables (package/strategy.tsv): "cue <word> <intent>" + "route <intent> <kind> <arg>". Optional — built by
 // the ergo strategy tier (rosetta). Lets the runtime route a query's intent to the right aggregate without any
 // natural-language logic of its own (the cue lexicon IS the language, and it lives here as data).
+static std::string lower(const std::string& s) {
+    std::string o(s.size(), '\0');
+    std::transform(s.begin(), s.end(), o.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+    return o;
+}
+// Does `entity` occur in `ql` as whole word(s) — bounded by non-alphanumerics, not inside a larger word? A trailing
+// plural "s" is tolerated (so the entity "instruction" matches "instructions" but NOT "instructional"); "m extension"
+// matches "…the m extension." but not "harm extension".
+static bool phrase_in(const std::string& ql, const std::string& entity) {
+    if (entity.empty()) return false;
+    for (size_t p = ql.find(entity); p != std::string::npos; p = ql.find(entity, p + 1)) {
+        bool lok = (p == 0) || !std::isalnum((unsigned char)ql[p - 1]);
+        size_t e = p + entity.size();
+        if (e < ql.size() && (ql[e] == 's' || ql[e] == 'S')) e++;     // tolerate an English plural suffix
+        bool rok = (e >= ql.size()) || !std::isalnum((unsigned char)ql[e]);
+        if (lok && rok) return true;
+    }
+    return false;
+}
+// Load package/strategy.tsv (built by rosetta strategy_tables + ergo/strategy.dl). Two row shapes:
+//   cue    <word>   <intent>             intent lexicon  (word/intent lowercased to match the lowercased query)
+//   answer <intent> <entity> <passage>   the uniform table; <entity> lowercased (matched as a substring of the query)
 static void load_strategy(const std::string& path) {
     std::ifstream f(path);
     if (!f) return;
@@ -186,9 +209,9 @@ static void load_strategy(const std::string& path) {
         std::istringstream ss(line);
         std::string tag, a, b, c;
         if (!std::getline(ss, tag, '\t')) continue;
-        if (tag == "cue" && std::getline(ss, a, '\t') && std::getline(ss, b)) g_cues[a] = b;
+        if (tag == "cue" && std::getline(ss, a, '\t') && std::getline(ss, b)) g_cues[lower(a)] = b;
         else if (tag == "answer" && std::getline(ss, a, '\t') && std::getline(ss, b, '\t') && std::getline(ss, c))
-            g_answers[a].push_back({b, c});                       // intent -> (entity, passage-id)
+            g_answers[a].push_back({lower(b), c});                // intent -> (entity, passage-id); entity lowercased
     }
 }
 // Best supporting passage for a cue (query + answer words): cosine over embeddings if loaded, else lexical Jaccard.
@@ -388,7 +411,7 @@ static const Passage* strategy_answer(const std::string& raw, const std::string&
         auto a = g_answers.find(intent);
         if (a == g_answers.end()) continue;
         for (const auto& row : a->second)                       // row = (entity, passage-id); longest named entity wins
-            if (row.first.size() > blen && ql.find(row.first) != std::string::npos) { blen = row.first.size(); best_id = &row.second; }
+            if (row.first.size() > blen && phrase_in(ql, row.first)) { blen = row.first.size(); best_id = &row.second; }
     }
     if (!best_id) return nullptr;                                // query named no known entity → fall through (abstain)
     for (const auto& p : g_knowledge) if (p.id == *best_id) return &p;
@@ -686,10 +709,16 @@ int main(int argc, char** argv) {
             g_answer_from_corpus ? " · retrieval-answer" : "",
             g_require_citation ? " · require-citation" : "", port);
     if (!g_answers.empty()) {
-        size_t nans = 0;
-        for (const auto& kv : g_answers) nans += kv.second.size();
+        size_t nans = 0, dangling = 0;
+        std::set<std::string> ids;
+        for (const auto& p : g_knowledge) ids.insert(p.id);
+        for (const auto& kv : g_answers)
+            for (const auto& row : kv.second) { nans++; if (!ids.count(row.second)) dangling++; }
         fprintf(stderr, "sgiandubh: strategy table — %zu intent cues, %zu answer rows (uniform intent·entity → passage)\n",
                 g_cues.size(), nans);
+        if (dangling)                                          // a strategy row pointing at a missing passage = build/runtime drift
+            fprintf(stderr, "sgiandubh: WARNING — %zu strategy rows reference passage ids absent from knowledge.tsv "
+                            "(stale strategy.tsv? rebuild the package)\n", dangling);
     }
     fprintf(stderr, "sgiandubh: thresholds  faithful-tau=%.2f  answer-cos=%.2f  answer-lex=%.2f  answer-margin=%.2f  ground-cos=%.2f  ground-lex=%.2f  (override via flags)\n",
             g_tau, g_answer_cos_tau, g_answer_lex_tau, g_answer_margin, g_cos_tau, g_ground_tau);
