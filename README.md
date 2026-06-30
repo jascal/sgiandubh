@@ -48,7 +48,8 @@ honored on `/retrieve`). Per instance: `--key "V Extension"` (the REPL respects 
 construction, exactly like off-domain. The hub (claymore) sets this automatically from a spoke's configured `key`.
 
 **REPL rendering.** On an interactive terminal the `--repl` loop renders Markdown + inline TeX/MathML math to Unicode;
-piped output stays raw (TTY-gated).
+piped output stays raw (TTY-gated). It also anchors a **fixed input line + a status footer** at the bottom (answers
+scroll above); pass `--plain` (or set `SGIANDUBH_REPL_PLAIN`) for a plain line-by-line prompt.
 
 ## Why small & fast
 The model cost was paid once, at extraction. Serving is a lexical match + a **native semiring combine** over a handful
