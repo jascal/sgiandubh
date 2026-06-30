@@ -370,26 +370,25 @@ static const Passage* strategy_answer(const std::string& raw, const std::string&
     if (g_answers.empty()) return nullptr;
     std::string ql;                                              // raw query, lowercased (entities are matched against it)
     for (char ch : raw) ql += (char)std::tolower((unsigned char)ch);
-    std::string intent = caller_intent;
-    if (intent.empty()) {                                        // infer: first query token that is a cue with answers
-        std::string tok;
-        auto flush = [&] {
-            if (!tok.empty() && intent.empty()) {
-                auto c = g_cues.find(tok);
-                if (c != g_cues.end() && g_answers.count(c->second)) intent = c->second;
-            }
+    std::set<std::string> intents;                              // the candidate intents to try
+    if (!caller_intent.empty()) {
+        intents.insert(caller_intent);                          // a caller-supplied intent is authoritative
+    } else {                                                    // else: EVERY intent whose cue word appears — not just the
+        std::string tok;                                        // first. "what is the total number of X" signals both
+        auto flush = [&] {                                      // define and count; the entity match below disambiguates.
+            if (!tok.empty()) { auto c = g_cues.find(tok); if (c != g_cues.end()) intents.insert(c->second); }
             tok.clear();
         };
         for (char ch : ql) { if (std::isalnum((unsigned char)ch)) tok += ch; else flush(); }
         flush();
     }
-    auto a = g_answers.find(intent);
-    if (a == g_answers.end()) return nullptr;
-    const std::string* best_id = nullptr;                        // the most specific named entity for this intent
+    const std::string* best_id = nullptr;                        // most specific named entity across all candidate intents
     size_t blen = 0;
-    for (const auto& row : a->second) {                          // row = (entity, passage-id)
-        const std::string& entity = row.first;
-        if (entity.size() > blen && ql.find(entity) != std::string::npos) { blen = entity.size(); best_id = &row.second; }
+    for (const auto& intent : intents) {
+        auto a = g_answers.find(intent);
+        if (a == g_answers.end()) continue;
+        for (const auto& row : a->second)                       // row = (entity, passage-id); longest named entity wins
+            if (row.first.size() > blen && ql.find(row.first) != std::string::npos) { blen = row.first.size(); best_id = &row.second; }
     }
     if (!best_id) return nullptr;                                // query named no known entity → fall through (abstain)
     for (const auto& p : g_knowledge) if (p.id == *best_id) return &p;
