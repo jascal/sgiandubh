@@ -188,6 +188,13 @@ static std::string lower(const std::string& s) {
     std::transform(s.begin(), s.end(), o.begin(), [](unsigned char c) { return (char)std::tolower(c); });
     return o;
 }
+// Truncate to ~n bytes WITHOUT splitting a UTF-8 sequence (else nlohmann::json::dump throws on the invalid bytes).
+static std::string clip(const std::string& s, size_t n) {
+    if (s.size() <= n) return s;
+    size_t e = n;
+    while (e > 0 && ((unsigned char)s[e] & 0xC0) == 0x80) e--;   // back off continuation bytes to a char boundary
+    return s.substr(0, e);
+}
 // Does `entity` occur in `ql` as whole word(s) — bounded by non-alphanumerics, not inside a larger word? A trailing
 // plural "s" is tolerated (so the entity "instruction" matches "instructions" but NOT "instructional"); "m extension"
 // matches "…the m extension." but not "harm extension".
@@ -857,6 +864,36 @@ int main(int argc, char** argv) {
         }
         json out; out["object"] = "sections"; out["count"] = (int)secs.size(); out["sections"] = json(secs);
         res.set_content(out.dump(), "application/json");
+    });
+    // DEGENERATE LIBRARIAN: every expert describes ITSELF as a catalog card — so a hub can aggregate one self-card per
+    // spoke into a federated catalog (and a librarian-package's per-document cards, which are its lib:* passages, ride
+    // along). The catalog capability is universal, not a special node; claymore federates these up the hierarchy.
+    svr.Get("/catalog", [](const httplib::Request&, httplib::Response& res) {
+        std::set<std::string> facets;
+        json doc_cards = json::array();
+        for (const auto& p : g_knowledge) {
+            if (p.id.rfind("lib:", 0) == 0) {                    // a librarian package: its passages ARE document cards
+                doc_cards.push_back(json{{"handle", p.id}, {"title", p.section}, {"summary", clip(p.text, 280)}});
+                continue;
+            }
+            auto dot = p.section.find("\xC2\xB7");
+            std::string f = (dot != std::string::npos) ? p.section.substr(dot + 2) : "";
+            size_t a = f.find_first_not_of(' ');
+            if (a != std::string::npos) facets.insert(f.substr(a));
+        }
+        std::vector<std::string> top(facets.begin(), facets.end());
+        if (top.size() > 24) top.resize(24);
+        json card;                                               // the self-card (degenerate librarian)
+        card["id"] = g_model;
+        card["kind"] = doc_cards.empty() ? "expert" : "catalog";
+        card["passages"] = (int)g_knowledge.size();
+        card["facets"] = top;
+        card["summary"] = "Expert '" + g_model + "' — " + std::to_string(g_knowledge.size()) + " passages" +
+                          (top.empty() ? "" : (" over: " + [&] { std::string s; for (size_t i = 0; i < top.size() && i < 8; i++) s += (i ? ", " : "") + top[i]; return s; }())) + ".";
+        json cards = json::array({card});
+        for (auto& dc : doc_cards) cards.push_back(dc);          // librarian package: include the per-document cards too
+        json out; out["object"] = "catalog"; out["cards"] = cards;
+        res.set_content(out.dump(-1, ' ', false, json::error_handler_t::replace), "application/json");  // tolerate stray bytes
     });
 
     svr.Post("/v1/chat/completions", [](const httplib::Request& q, httplib::Response& r) { handle(q, r, "chat"); });
