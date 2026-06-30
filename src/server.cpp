@@ -58,6 +58,8 @@ static double g_cos_tau = 0.35;           // min cosine to ground (attach a supp
 static double g_answer_cos_tau = 0.50;    // stricter bar to RETURN a passage AS the answer (retrieval-answer)
 static double g_answer_lex_tau = 0.18;    //   "  (lexical fallback)
 static double g_answer_margin = 0.20;     // top match must beat the mean cosine by this (off-domain = flat → reject)
+static double g_answer_cov_tau = 0.60;    // OR accept on lexical term-COVERAGE: a passage holding this fraction of the
+                                          // query's content-words is a strong match even if mean-pooled cosine is low
 static bool g_require_citation = false;   // --require-citation: refuse any answer that can't be grounded/cited
 static bool g_answer_from_corpus = false; // --answer-from-corpus: return the best passage verbatim (retrieval-as-answer)
 static bool g_no_gram = false;            // --no-gram: disable the generative tail (faithful → retrieval → abstain only) — the strongest-trust config
@@ -87,6 +89,15 @@ static double jaccard(const std::set<std::string>& a, const std::set<std::string
     size_t inter = 0;
     for (const auto& x : a) if (b.count(x)) inter++;
     return (double)inter / (double)(a.size() + b.size() - inter);
+}
+// Fraction of the QUERY's content-words present in a passage — the lexical signal mean-pooled cosine misses on short /
+// term-heavy queries ("hart", "aq rl bits"). Denominator is the query (not the union), so a focused query whose terms
+// all appear scores 1.0 regardless of passage length. Pairs with cosine in a hybrid re-rank.
+static double coverage(const std::set<std::string>& q, const std::set<std::string>& p) {
+    if (q.empty()) return 0.0;
+    size_t inter = 0;
+    for (const auto& x : q) if (p.count(x)) inter++;
+    return (double)inter / (double)q.size();
 }
 
 // The machine handle of a citation: a section is "id · Facet" (e.g. "norm:fence_i_op · Zifencei"); the id is the part
@@ -183,20 +194,30 @@ static const Passage* ground(const std::set<std::string>& cue, double cos_tau = 
 static const Passage* retrieve_answer(const std::set<std::string>& qw) {
     if (g_knowledge.empty()) return nullptr;
     if (g_dim > 0) {
-        std::vector<float> qv = embed(qw);
-        if (qv.empty()) return nullptr;
+        std::vector<float> qv = embed(qw);                     // may be empty (no in-vocab query words) → lexical only
         const Passage* best = nullptr;
-        double bs = -2.0, sum = 0.0;
+        double brank = -2.0, bcos = -2.0, bcov = 0.0, sum = 0.0;
         int n = 0;
         for (const auto& p : g_knowledge) {
-            if ((int)p.vec.size() != g_dim) continue;
-            double s = 0;
-            for (int i = 0; i < g_dim; i++) s += (double)qv[i] * p.vec[i];
-            sum += s; n++;
-            if (s > bs) { bs = s; best = &p; }
+            double cos = -2.0;
+            if (!qv.empty() && (int)p.vec.size() == g_dim) {
+                cos = 0;
+                for (int i = 0; i < g_dim; i++) cos += (double)qv[i] * p.vec[i];
+                sum += cos; n++;
+            }
+            double cov = coverage(qw, p.w);
+            // HYBRID re-rank: coverage dominates (recall on term-heavy queries), cosine breaks ties toward the most
+            // semantically-relevant of the equally-covered passages (so a ubiquitous term picks the DEFINING rule, not
+            // an arbitrary mentioning one).
+            double rank = cov + 0.4 * (cos > 0 ? cos : 0.0);
+            if (rank > brank) { brank = rank; best = &p; bcos = cos; bcov = cov; }
         }
         double mean = n ? sum / n : 0.0;
-        return (best && bs >= g_answer_cos_tau && (bs - mean) >= g_answer_margin) ? best : nullptr;
+        // Accept on a strong SEMANTIC match (cosine clears its bar AND stands out from the field) OR a strong LEXICAL one
+        // (most query terms present) — the lexical path rescues short/term-heavy in-domain queries the cosine floor drops,
+        // while off-domain (low cosine AND low coverage) is still rejected.
+        bool ok = best && ((bcos >= g_answer_cos_tau && (bcos - mean) >= g_answer_margin) || bcov >= g_answer_cov_tau);
+        return ok ? best : nullptr;
     }
     return ground(qw, g_answer_cos_tau, g_answer_lex_tau);  // lexical fallback (jaccard is already discriminative)
 }
@@ -219,7 +240,8 @@ retrieve_many(const std::set<std::string>& qw, int k, double min_score, const st
         if (list_all) s = 1.0;
         else if (vec) {
             if ((int)p.vec.size() != g_dim) continue;
-            s = 0; for (int i = 0; i < g_dim; i++) s += (double)qv[i] * p.vec[i];
+            double cos = 0; for (int i = 0; i < g_dim; i++) cos += (double)qv[i] * p.vec[i];
+            s = std::max(cos, coverage(qw, p.w));         // hybrid: semantic OR lexical term-coverage
         } else s = jaccard(qw, p.w);
         if (s >= min_score) hits.push_back({&p, s});
     }
@@ -528,6 +550,7 @@ int main(int argc, char** argv) {
         else if (a == "--ground-lex") fval(g_ground_tau);         //   "  (lexical fallback)
         else if (a == "--answer-cos") fval(g_answer_cos_tau);     // min cosine to RETURN a passage as the answer
         else if (a == "--answer-lex") fval(g_answer_lex_tau);     //   "  (lexical fallback)
+        else if (a == "--answer-cov") fval(g_answer_cov_tau);     // term-coverage bar for the hybrid lexical accept
         else if (a == "--answer-margin") fval(g_answer_margin);   // top match must beat the mean by this (off-domain reject)
         else pos.push_back(a);
     }
