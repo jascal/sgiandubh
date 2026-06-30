@@ -14,6 +14,7 @@
 #include "json.hpp"
 #include "gram.h"
 #include "md_render.h"              // terminal markdown + TeX/MathML rendering for the REPL (identical copy in claymore)
+#include "repl_tui.h"               // fixed input line + status footer for the REPL (identical copy in claymore)
 #include "rosetta_package.h"        // consume a rosetta expert package + the C++ semiring decode (the convergence runtime)
 #include "../tok_ffi/tok_ffi.h"     // HF tokenizers via FFI — BPE tokenize for the rosetta-package path
 #include <algorithm>
@@ -79,6 +80,7 @@ static bool g_require_citation = false;   // --require-citation: refuse any answ
 static bool g_answer_from_corpus = false; // --answer-from-corpus: return the best passage verbatim (retrieval-as-answer)
 static bool g_no_gram = false;            // --no-gram: disable the generative tail (faithful → retrieval → abstain only) — the strongest-trust config
 static bool g_repl = false;               // --repl: interactive stdin loop for local testing (no server)
+static bool g_repl_plain = false;         // --plain: disable the fixed-input/footer REPL TUI (plain getline)
 static bool g_rosetta_pkg = false;        // --rosetta-package: serve a rosetta expert package (manifest.json + tokenizer), host-side
 
 static bool stop(const std::string& w) {
@@ -707,6 +709,7 @@ int main(int argc, char** argv) {
         else if (a == "--answer-from-corpus") g_answer_from_corpus = true;
         else if (a == "--no-gram") g_no_gram = true;
         else if (a == "--repl") g_repl = true;
+        else if (a == "--plain") g_repl_plain = true;
         else if (a == "--rosetta-package") g_rosetta_pkg = true;
         // Tunable matching thresholds (defaults above are conservative; tune on a representative test set):
         else if (a == "--tau") fval(g_tau);                       // faithful lexical-Jaccard match
@@ -795,17 +798,24 @@ int main(int argc, char** argv) {
 
     if (g_repl) {  // local testing: read queries from stdin, print answers (no server)
         bool tty = isatty(fileno(stdout));                     // render markdown/TeX only for an interactive terminal
+        repltui::Repl ui;                                      // fixed input line + status footer (TTY only; --plain opts out)
+        if (!g_repl_plain) ui.start("SGIANDUBH_REPL_PLAIN");
+        std::string foot = "sgiandubh · " + g_model + " · items=" + std::to_string(g_items.size()) +
+                           " passages=" + std::to_string(g_knowledge.size()) +
+                           (g_knowledge.empty() ? "" : (g_dim > 0 ? " · vector" : " · lexical")) +
+                           (g_default_key.empty() ? "" : (" · key=" + g_default_key)) + " · blank=quit";
+        ui.set_footer(foot);
         fprintf(stderr, "sgiandubh REPL — type a query; blank line or Ctrl-D to exit.\n");
         std::string line;
         while (true) {
-            fprintf(stderr, "\n> "); fflush(stderr);
-            if (!std::getline(std::cin, line) || line.empty()) break;
+            if (ui.readline("> ", line) == repltui::Repl::EOF_QUIT || line.empty()) break;
             Answer a = answer(line);
             printf("%s\n", tty ? mdterm::render(a.content, true).c_str() : a.content.c_str());
             if (a.confidence >= 0) printf("  [kind=%s · confidence p≈%.2f]\n", a.kind.c_str(), a.confidence);
             else printf("  [kind=%s]\n", a.kind.c_str());
             fflush(stdout);
         }
+        ui.stop();
         return 0;
     }
 
