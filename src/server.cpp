@@ -262,6 +262,8 @@ static const Passage* retrieve_answer(const std::set<std::string>& qw) {
         // Scan a contiguous shard [s,e) → its RetrievePart. The cosine scan is the per-query cost; at ~100-document
         // scale (tens of thousands of passages) it is split across threads. Shards are processed in index order and the
         // reduction uses strict '>', so the result is IDENTICAL to the serial scan regardless of thread count.
+        // The scan body calls only pure, read-only helpers (the dot product over p.vec/qv, and coverage() over the
+        // word sets) — no shared mutable state — so each shard runs lock-free; pt is written by exactly one thread.
         auto scan = [&](size_t s, size_t e, RetrievePart& pt) {
             for (size_t i = s; i < e; i++) {
                 const Passage& p = g_knowledge[i];
@@ -278,7 +280,9 @@ static const Passage* retrieve_answer(const std::set<std::string>& qw) {
             }
         };
         unsigned T = std::thread::hardware_concurrency();
-        if (T < 2 || N < 4000) T = 1; else T = std::min<unsigned>(T, 8);   // serial for small experts (thread overhead)
+        // ~4000 = a conservative break-even heuristic (not hardware-profiled): below it the thread spawn/join cost
+        // outweighs a ~4k×300d scan; the cap of 8 avoids oversubscription on many-core hosts. Tune if profiling warrants.
+        if (T < 2 || N < 4000) T = 1; else T = std::min<unsigned>(T, 8);
         std::vector<RetrievePart> parts(T);
         if (T == 1) {
             scan(0, N, parts[0]);
