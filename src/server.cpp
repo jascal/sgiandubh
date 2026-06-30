@@ -49,7 +49,7 @@ static double g_tau = 0.25; // faithful-match threshold (lexical Jaccard) — be
 static Gram g_gram; // generative fallback (n-gram + induction), loaded if package/gram/ exists
 
 // Grounding: the owner's corpus passages, so every answer can carry the verbatim source it's supported by.
-struct Passage { std::string id, section, text; std::set<std::string> w; std::vector<float> vec; };
+struct Passage { std::string id, section, text, text_lc; std::set<std::string> w; std::vector<float> vec; };
 static std::vector<Passage> g_knowledge;  // loaded from package/knowledge.tsv (optional)
 static std::unordered_map<std::string, std::vector<float>> g_wordvec; // corpus word embeddings (package/wordvec.txt)
 static int g_dim = 0;                      // embedding dim (>0 once wordvec.txt is loaded → cosine grounding)
@@ -160,6 +160,9 @@ static void load_knowledge(const std::string& path) {
         p.section = line.substr(0, tab);
         p.id = cite_id(p.section);                              // the callable handle (the slug before "·")
         p.text = line.substr(tab + 1);
+        p.text_lc.resize(p.text.size());
+        std::transform(p.text.begin(), p.text.end(), p.text_lc.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });    // for the definitional re-rank
         p.w = words(p.text);
         if (p.w.empty()) continue;
         p.vec = embed(p.w);  // precompute the passage embedding (empty if no vectors loaded)
@@ -193,10 +196,58 @@ static const Passage* ground(const std::set<std::string>& cue, double cos_tau = 
     return best;
 }
 
+// Is this a definitional query — "what is X", "define X", "describe/explain X", "what does X mean"? Such a query wants
+// the passage that DEFINES its head term, not just any passage mentioning it. Used to enable the defining-passage boost.
+static bool is_definitional(const std::string& raw) {
+    std::string q;
+    for (char c : raw) { if (c == '\t' || c == '\n') c = ' '; q += (char)std::tolower((unsigned char)c); }
+    while (!q.empty() && q[0] == ' ') q.erase(0, 1);
+    auto starts = [&](const char* s) { return q.rfind(s, 0) == 0; };
+    return starts("what is") || starts("what are") || starts("what's") || starts("whats ") ||
+           starts("define ") || starts("definition of") || starts("describe ") || starts("explain ") ||
+           (starts("what does") && q.find("mean") != std::string::npos);
+}
+
+// Whole-word position of `term` in `text` (bounded by non-alnum), or npos.
+static size_t word_pos(const std::string& text, const std::string& term) {
+    for (size_t from = 0;;) {
+        size_t p = text.find(term, from);
+        if (p == std::string::npos) return std::string::npos;
+        bool lok = (p == 0) || !std::isalnum((unsigned char)text[p - 1]);
+        size_t e = p + term.size();
+        bool rok = (e >= text.size()) || !std::isalnum((unsigned char)text[e]);
+        if (lok && rok) return p;
+        from = p + 1;
+    }
+}
+
+// Does `text_lc` DEFINE `term`? True when the term is in subject position with a copula/defining cue — "<term> is / are
+// / refers to / denotes / means …" just after it, or "termed / called / known as <term>" just before. A bare mention
+// ("…the hart has retired") is not a definition. Cheap, order-aware (a word SET can't see "X is"); intentionally loose.
+static bool defines_term(const std::string& text_lc, const std::string& term) {
+    size_t p = word_pos(text_lc, term);
+    if (p == std::string::npos) return false;
+    std::string after = text_lc.substr(p + term.size(), 24);
+    // A definition has the copula DIRECTLY after the subject ("hart is a", "satp CSR is an") — allow a short noun head
+    // in between but NOT a clause boundary. So require a copula+noun-phrase cue ("is a/an/the", "are", "refers to", …)
+    // with no punctuation between the term and the cue: that admits "satp CSR is an…" but rejects "…a hart h, s is a…".
+    for (const char* cue : {" is a", " is an", " is the", " is one", " is defined", " is used to",
+                            " are ", " refers to", " denotes", " means "}) {
+        size_t k = after.find(cue);
+        if (k != std::string::npos && after.substr(0, k).find_first_of(",.;:()") == std::string::npos)
+            return true;
+    }
+    std::string before = text_lc.substr(p >= 18 ? p - 18 : 0, p >= 18 ? 18 : p);
+    for (const char* cue : {"termed", "called", "known as", "term "})
+        if (before.find(cue) != std::string::npos) return true;
+    return false;
+}
+
 // Retrieve the best passage to return AS the answer, with a MARGIN gate: the top match must stand out from the field.
 // An off-domain query produces a flat, uniformly-mediocre cosine profile (no clear winner) → nullptr → abstain.
-static const Passage* retrieve_answer(const std::set<std::string>& qw) {
+static const Passage* retrieve_answer(const std::set<std::string>& qw, const std::string& raw = "") {
     if (g_knowledge.empty()) return nullptr;
+    bool defq = is_definitional(raw);                          // "what is X" → prefer the passage that DEFINES X
     if (g_dim > 0) {
         std::vector<float> qv = embed(qw);                     // may be empty (no in-vocab query words) → lexical only
         const Passage* best = nullptr;
@@ -214,6 +265,27 @@ static const Passage* retrieve_answer(const std::set<std::string>& qw) {
             // semantically-relevant of the equally-covered passages (so a ubiquitous term picks the DEFINING rule, not
             // an arbitrary mentioning one).
             double rank = cov + 0.4 * (cos > 0 ? cos : 0.0);
+            // DEFINITIONAL boost: for "what is X", prefer the passage that DEFINES X over one that merely mentions it,
+            // so the sourced prose ("a hart is …") beats a terse rule that happens to contain "hart". Two stacking
+            // signals, gated to cov>=0.5 (an off-domain query sharing one stray word is never boosted → no leak):
+            //   +0.6  prose namespace — "manual:" ids are explanatory definitions; "norm:" ids are requirements (a
+            //         package-id convention; a builder-marked passage-kind column would be the cleaner long-term form).
+            //   +0.3  a literal "<term> is a/are/refers to…" defining pattern (works for prose AND rules).
+            if (defq && cov >= 0.5) {
+                if (p.id.rfind("manual:", 0) == 0) rank += 0.6;          // prose namespace = definitions, not rules
+                bool def = false;
+                size_t fp = std::string::npos;
+                for (const auto& t : qw) {
+                    if (defines_term(p.text_lc, t)) def = true;          // a literal "<term> is a…" definition
+                    size_t pos = word_pos(p.text_lc, t);
+                    if (pos < fp) fp = pos;
+                }
+                if (def) rank += 0.3;
+                // centrality tie-break: a passage that's ABOUT the term introduces it early (topic sentence), vs one
+                // that mentions it in passing — a uniform signal that resolves the cov-1.0 ties cosine breaks unreliably.
+                if (fp != std::string::npos)
+                    rank += 0.3 * (1.0 - (double)std::min(fp, (size_t)400) / 400.0);
+            }
             if (rank > brank) { brank = rank; best = &p; bcos = cos; bcov = cov; }
         }
         double mean = n ? sum / n : 0.0;
@@ -363,7 +435,7 @@ static Answer answer(const std::string& user) {
         a.route = hit->route; a.margin = hit->margin;   // carry the provenance tier + fragile-link margin
     }
     if (!is_answer && g_answer_from_corpus && !g_knowledge.empty()) {
-        const Passage* gp = retrieve_answer(qw);                                        // retrieval-as-answer (strict + margin)
+        const Passage* gp = retrieve_answer(qw, user);                                  // retrieval-as-answer (strict + margin)
         if (gp) { body = gp->text; item_cite = gp->section; is_answer = true; is_retrieval = true; a.kind = "retrieved"; }
     }
     if (!is_answer && !g_no_gram && g_gram.loaded) {
