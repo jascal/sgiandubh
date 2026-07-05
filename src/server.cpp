@@ -732,6 +732,47 @@ int main(int argc, char** argv) {
         catch (const std::exception& e) { fprintf(stderr, "sgiandubh: %s\n", e.what()); return 1; }
         Tokenizer* tok = tk_new((g_pkg + "/bundle.tokenizer.json").c_str());
         if (!tok) { fprintf(stderr, "sgiandubh: --rosetta-package needs %s/bundle.tokenizer.json\n", g_pkg.c_str()); return 1; }
+        if (!g_repl) {  // HTTP SPOKE mode: an OpenAI endpoint claymore can federate (abstain = kind:"abstain")
+            httplib::Server rsrv;
+            static std::mutex mu;
+            rsrv.Post("/v1/chat/completions", [&](const httplib::Request& rq, httplib::Response& rs) {
+                std::string q;
+                json body = json::parse(rq.body, nullptr, false);
+                if (!body.is_discarded() && body.contains("messages"))
+                    for (auto& mm : body["messages"])
+                        if (mm.value("role", "") == "user") q = mm.value("content", "");
+                json a;
+                {
+                    std::lock_guard<std::mutex> lk(mu);
+                    unsigned qids[512];
+                    int qn = tk_encode(tok, q.c_str(), qids, 512);
+                    if (qn <= 0) { a = json{{"answer", ""}, {"kind", "abstain"}}; }
+                    else {
+                        std::vector<int> qctx(qids, qids + qn);
+                        auto qd = pk.serve(qctx);
+                        if (qd) {
+                            char qbuf[512];
+                            int qm = tk_decode(tok, (unsigned)qd->answer, qbuf, sizeof qbuf);
+                            a["answer"] = qm > 0 ? std::string(qbuf, qm) : ("#" + std::to_string(qd->answer));
+                            a["kind"] = "distilled";
+                            a["citation"] = qd->citation;
+                            a["route"] = qd->tier + "/" + qd->basis;
+                            if (qd->conf >= 0) a["confidence"] = qd->conf;
+                        } else a = json{{"answer", ""}, {"kind", "abstain"}};
+                    }
+                }
+                json out;
+                out["model"] = "sgiandubh-rosetta-package";
+                out["choices"] = json::array({json{{"index", 0}, {"finish_reason", "stop"},
+                    {"message", json{{"role", "assistant"}, {"content", a.dump()}}}}});
+                rs.set_content(out.dump(), "application/json");
+            });
+            fprintf(stderr, "sgiandubh rosetta-package SPOKE: %d rules (%zu trusted, W=%d) · next-token expert · listening :%d\n",
+                    pk.n_rules, pk.idioms.size(), pk.W, port);
+            rsrv.listen("0.0.0.0", port);
+            tk_free(tok);
+            return 0;
+        }
         fprintf(stderr, "sgiandubh rosetta-package: %d rules (%zu trusted idioms, W=%d) — type a query; blank/Ctrl-D to exit.\n",
                 pk.n_rules, pk.idioms.size(), pk.W);
         char buf[512];

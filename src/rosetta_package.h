@@ -1,6 +1,6 @@
 // rosetta_package.h — sgiandubh's consumer of a rosetta expert package (the convergence: rosetta builds, sgiandubh serves).
 // Loads manifest.json (idiom_learn --package, or the flat abstain_emit manifest) and serves host-side, NO souffle, NO model:
-//   tokenize(query) → TRUSTED idioms (frame-match) → GATED n-grams (longest suffix) → ABSTAIN.
+//   tokenize(query) → TRUSTED idioms (frame-match) → GATED n-grams (longest suffix) → relation → induction → ABSTAIN.
 // This is the C++ port of rosetta/py/serve_package.py (load_package + serve); the schema is rosetta/PACKAGE.md.
 #ifndef ROSETTA_PACKAGE_H
 #define ROSETTA_PACKAGE_H
@@ -19,17 +19,21 @@ namespace rosetta {
 using json = nlohmann::json;
 using Ctx = std::vector<int>;                                    // token ids (model vocab < 2^31)
 
-struct Idiom {                                                   // TRUSTED tier (causal): gate or compose
-    std::string kind, cite;                                      // "gate" | "compose"
+struct Idiom {                                                   // TRUSTED tier (causal): gate, compose or induction
+    std::string kind, cite;                                      // "gate" | "compose" | "induction"
     int id = -1;
     std::map<int, int> frame;                                    // offset (1 = last token) -> token
     int slot = 0;                                                // gate: content slot
     std::map<int, int> table;                                    // gate: content token -> out
     int k1 = 0, k2 = 0;                                          // compose: operand offsets
     std::map<int, int> valmap, sum;                             // compose: token->value, value-sum->out
+    int L = 0;                                                   // induction: suffix match length
+    std::vector<std::pair<int, int>> eq;                         // relation: eq-guard offset pairs
+    int copy_off = 0;                                            // relation: copy offset
+    double conf = -1.0;                                          // optional confidence (trusted kinds)
 };
-struct NGram { int out; std::string basis, cite; };             // GATED tier (observational)
-struct Decision { int answer; std::string tier, basis, citation; int rule = -1; };
+struct NGram { int out; std::string basis, cite; double det = -1.0; };  // GATED tier (observational)
+struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
 struct Package {
     std::vector<Idiom> idioms;                                   // TRUSTED, in priority order
@@ -77,7 +81,8 @@ struct Package {
             try {                                               // a malformed/short-of-fields rule names itself, not a raw json throw
                 if (kind == "ngram") {
                     Ctx ctx = r.at("ctx").get<Ctx>();
-                    p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")), cite};
+                    p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")),
+                                                 cite, r.value("determinism", -1.0)};
                 } else if (kind == "gate") {
                     Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.slot = r.at("slot").get<int>(); id.table = imap(r.at("table"));
@@ -86,6 +91,17 @@ struct Package {
                     Idiom id; id.kind = "compose"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.k1 = r.at("operands").at(0); id.k2 = r.at("operands").at(1);
                     id.valmap = imap(r.at("valmap")); id.sum = imap(r.at("sum"));
+                    p.idioms.push_back(std::move(id));
+                } else if (kind == "induction") {               // causal COPY circuit, routed OOD after n-grams
+                    Idiom id; id.kind = "induction"; id.id = r.value("id", -1); id.cite = cite;
+                    id.conf = r.value("confidence", -1.0);
+                    id.L = r.at("L").get<int>();
+                    p.idioms.push_back(std::move(id));
+                } else if (kind == "relation") {                // causal EQ-GUARD + COPY, routed OOD
+                    Idiom id; id.kind = "relation"; id.id = r.value("id", -1); id.cite = cite;
+                    id.conf = r.value("confidence", -1.0);
+                    for (auto& ij : r.at("eq")) id.eq.emplace_back(ij.at(0).get<int>(), ij.at(1).get<int>());
+                    id.copy_off = r.at("copy").get<int>();
                     p.idioms.push_back(std::move(id));
                 }                                               // unknown kinds are skipped (forward-compat with newer packages)
             } catch (const json::exception& e) {
@@ -111,6 +127,7 @@ struct Package {
     std::optional<Decision> serve(const Ctx& ctx) const {
         int n = (int)ctx.size();
         for (const auto& r : idioms) {                          // TRUSTED tier (causal) first
+            if (r.kind == "induction" || r.kind == "relation") continue;  // routed OOD, below the n-gram tier
             bool fr = true;
             for (auto& kv : r.frame) { if (kv.first > n || ctx[n - kv.first] != kv.second) { fr = false; break; } }
             if (!fr) continue;
@@ -132,7 +149,33 @@ struct Package {
         for (int k = std::min(n, W); k >= 1; --k) {             // GATED n-gram tier (longest suffix wins)
             Ctx suf(ctx.end() - k, ctx.end());
             auto it = ngrams[k].find(suf);
-            if (it != ngrams[k].end()) return Decision{it->second.out, "gated", it->second.basis, it->second.cite};
+            if (it != ngrams[k].end()) return Decision{it->second.out, "gated", it->second.basis, it->second.cite,
+                                                       -1, it->second.det};
+        }
+        // relation (causal EQ-GUARD + COPY), OOD fallback ABOVE succession/induction — the most specific routed
+        // circuit: fires iff ctx[-i] == ctx[-j] for every eq pair (1-based from the end), then copies ctx[-copy].
+        for (const auto& r : idioms) {
+            if (r.kind != "relation") continue;
+            int need = r.copy_off;
+            bool ok = true;
+            for (auto& ij : r.eq) { need = std::max({need, ij.first, ij.second}); }
+            if (need > n) continue;
+            for (auto& ij : r.eq) if (ctx[n - ij.first] != ctx[n - ij.second]) { ok = false; break; }
+            if (ok) return Decision{ctx[n - r.copy_off], "trusted", "causal", r.cite, r.id, r.conf};
+        }
+        // induction (causal COPY), OOD fallback — reached ONLY after an n-gram miss (port of
+        // serve_package.py): longest L first; find the previous occurrence of the current L-token
+        // suffix; among several, copy the MOST RECENT occurrence's successor ([… A B … A] → B).
+        std::vector<const Idiom*> inds;
+        for (const auto& r : idioms) if (r.kind == "induction") inds.push_back(&r);
+        std::sort(inds.begin(), inds.end(), [](const Idiom* a, const Idiom* b) { return a->L > b->L; });
+        for (const Idiom* r : inds) {
+            if (n <= r->L) continue;
+            int bestj = -1;
+            for (int j = 0; j + r->L < n; ++j)
+                if (std::equal(ctx.end() - r->L, ctx.end(), ctx.begin() + j)) bestj = j;
+            if (bestj >= 0)
+                return Decision{ctx[bestj + r->L], "trusted", "causal", r->cite, r->id, r->conf};
         }
         return std::nullopt;                                    // ABSTAIN
     }
