@@ -30,9 +30,10 @@ struct Idiom {                                                   // TRUSTED tier
     int L = 0;                                                   // induction: suffix match length
     std::vector<std::pair<int, int>> eq;                         // relation: eq-guard offset pairs
     int copy_off = 0;                                            // relation: copy offset
+    double conf = -1.0;                                          // optional confidence (trusted kinds)
 };
-struct NGram { int out; std::string basis, cite; };             // GATED tier (observational)
-struct Decision { int answer; std::string tier, basis, citation; int rule = -1; };
+struct NGram { int out; std::string basis, cite; double det = -1.0; };  // GATED tier (observational)
+struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
 struct Package {
     std::vector<Idiom> idioms;                                   // TRUSTED, in priority order
@@ -80,7 +81,8 @@ struct Package {
             try {                                               // a malformed/short-of-fields rule names itself, not a raw json throw
                 if (kind == "ngram") {
                     Ctx ctx = r.at("ctx").get<Ctx>();
-                    p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")), cite};
+                    p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")),
+                                                 cite, r.value("determinism", -1.0)};
                 } else if (kind == "gate") {
                     Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.slot = r.at("slot").get<int>(); id.table = imap(r.at("table"));
@@ -92,10 +94,12 @@ struct Package {
                     p.idioms.push_back(std::move(id));
                 } else if (kind == "induction") {               // causal COPY circuit, routed OOD after n-grams
                     Idiom id; id.kind = "induction"; id.id = r.value("id", -1); id.cite = cite;
+                    id.conf = r.value("confidence", -1.0);
                     id.L = r.at("L").get<int>();
                     p.idioms.push_back(std::move(id));
                 } else if (kind == "relation") {                // causal EQ-GUARD + COPY, routed OOD
                     Idiom id; id.kind = "relation"; id.id = r.value("id", -1); id.cite = cite;
+                    id.conf = r.value("confidence", -1.0);
                     for (auto& ij : r.at("eq")) id.eq.emplace_back(ij.at(0).get<int>(), ij.at(1).get<int>());
                     id.copy_off = r.at("copy").get<int>();
                     p.idioms.push_back(std::move(id));
@@ -145,7 +149,8 @@ struct Package {
         for (int k = std::min(n, W); k >= 1; --k) {             // GATED n-gram tier (longest suffix wins)
             Ctx suf(ctx.end() - k, ctx.end());
             auto it = ngrams[k].find(suf);
-            if (it != ngrams[k].end()) return Decision{it->second.out, "gated", it->second.basis, it->second.cite};
+            if (it != ngrams[k].end()) return Decision{it->second.out, "gated", it->second.basis, it->second.cite,
+                                                       -1, it->second.det};
         }
         // relation (causal EQ-GUARD + COPY), OOD fallback ABOVE succession/induction — the most specific routed
         // circuit: fires iff ctx[-i] == ctx[-j] for every eq pair (1-based from the end), then copies ctx[-copy].
@@ -156,7 +161,7 @@ struct Package {
             for (auto& ij : r.eq) { need = std::max({need, ij.first, ij.second}); }
             if (need > n) continue;
             for (auto& ij : r.eq) if (ctx[n - ij.first] != ctx[n - ij.second]) { ok = false; break; }
-            if (ok) return Decision{ctx[n - r.copy_off], "trusted", "causal", r.cite, r.id};
+            if (ok) return Decision{ctx[n - r.copy_off], "trusted", "causal", r.cite, r.id, r.conf};
         }
         // induction (causal COPY), OOD fallback — reached ONLY after an n-gram miss (port of
         // serve_package.py): longest L first; find the previous occurrence of the current L-token
@@ -170,7 +175,7 @@ struct Package {
             for (int j = 0; j + r->L < n; ++j)
                 if (std::equal(ctx.end() - r->L, ctx.end(), ctx.begin() + j)) bestj = j;
             if (bestj >= 0)
-                return Decision{ctx[bestj + r->L], "trusted", "causal", r->cite, r->id};
+                return Decision{ctx[bestj + r->L], "trusted", "causal", r->cite, r->id, r->conf};
         }
         return std::nullopt;                                    // ABSTAIN
     }
