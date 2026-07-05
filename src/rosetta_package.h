@@ -1,6 +1,6 @@
 // rosetta_package.h — sgiandubh's consumer of a rosetta expert package (the convergence: rosetta builds, sgiandubh serves).
 // Loads manifest.json (idiom_learn --package, or the flat abstain_emit manifest) and serves host-side, NO souffle, NO model:
-//   tokenize(query) → TRUSTED idioms (frame-match) → GATED n-grams (longest suffix) → induction (OOD copy) → ABSTAIN.
+//   tokenize(query) → TRUSTED idioms (frame-match) → GATED n-grams (longest suffix) → relation → induction → ABSTAIN.
 // This is the C++ port of rosetta/py/serve_package.py (load_package + serve); the schema is rosetta/PACKAGE.md.
 #ifndef ROSETTA_PACKAGE_H
 #define ROSETTA_PACKAGE_H
@@ -28,6 +28,8 @@ struct Idiom {                                                   // TRUSTED tier
     int k1 = 0, k2 = 0;                                          // compose: operand offsets
     std::map<int, int> valmap, sum;                             // compose: token->value, value-sum->out
     int L = 0;                                                   // induction: suffix match length
+    std::vector<std::pair<int, int>> eq;                         // relation: eq-guard offset pairs
+    int copy_off = 0;                                            // relation: copy offset
 };
 struct NGram { int out; std::string basis, cite; };             // GATED tier (observational)
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; };
@@ -92,6 +94,11 @@ struct Package {
                     Idiom id; id.kind = "induction"; id.id = r.value("id", -1); id.cite = cite;
                     id.L = r.at("L").get<int>();
                     p.idioms.push_back(std::move(id));
+                } else if (kind == "relation") {                // causal EQ-GUARD + COPY, routed OOD
+                    Idiom id; id.kind = "relation"; id.id = r.value("id", -1); id.cite = cite;
+                    for (auto& ij : r.at("eq")) id.eq.emplace_back(ij.at(0).get<int>(), ij.at(1).get<int>());
+                    id.copy_off = r.at("copy").get<int>();
+                    p.idioms.push_back(std::move(id));
                 }                                               // unknown kinds are skipped (forward-compat with newer packages)
             } catch (const json::exception& e) {
                 throw std::runtime_error("rosetta package: rule #" + std::to_string(ri) + " (" + kind + ") in "
@@ -116,7 +123,7 @@ struct Package {
     std::optional<Decision> serve(const Ctx& ctx) const {
         int n = (int)ctx.size();
         for (const auto& r : idioms) {                          // TRUSTED tier (causal) first
-            if (r.kind == "induction") continue;                // routed OOD, below the n-gram tier
+            if (r.kind == "induction" || r.kind == "relation") continue;  // routed OOD, below the n-gram tier
             bool fr = true;
             for (auto& kv : r.frame) { if (kv.first > n || ctx[n - kv.first] != kv.second) { fr = false; break; } }
             if (!fr) continue;
@@ -139,6 +146,17 @@ struct Package {
             Ctx suf(ctx.end() - k, ctx.end());
             auto it = ngrams[k].find(suf);
             if (it != ngrams[k].end()) return Decision{it->second.out, "gated", it->second.basis, it->second.cite};
+        }
+        // relation (causal EQ-GUARD + COPY), OOD fallback ABOVE succession/induction — the most specific routed
+        // circuit: fires iff ctx[-i] == ctx[-j] for every eq pair (1-based from the end), then copies ctx[-copy].
+        for (const auto& r : idioms) {
+            if (r.kind != "relation") continue;
+            int need = r.copy_off;
+            bool ok = true;
+            for (auto& ij : r.eq) { need = std::max({need, ij.first, ij.second}); }
+            if (need > n) continue;
+            for (auto& ij : r.eq) if (ctx[n - ij.first] != ctx[n - ij.second]) { ok = false; break; }
+            if (ok) return Decision{ctx[n - r.copy_off], "trusted", "causal", r.cite, r.id};
         }
         // induction (causal COPY), OOD fallback — reached ONLY after an n-gram miss (port of
         // serve_package.py): longest L first; find the previous occurrence of the current L-token
