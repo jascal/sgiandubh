@@ -38,7 +38,7 @@ struct Idiom {                                                   // TRUSTED tier
     std::map<std::pair<int, int>, int> dtable;                   // dgate: (feature, last) -> out
     std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
 };
-struct Derived { std::string id, kind, of; std::set<int> openers, closers, members; int cap = 8, succ = 0, of_shift = 0; };
+struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members; int cap = 8, succ = 0, of_shift = 0; };
 struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; };  // GATED tier
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
@@ -87,6 +87,7 @@ struct Package {
                 if (d.contains("openers")) for (auto& t : d["openers"]) dv.openers.insert(t.get<int>());
                 if (d.contains("closers")) for (auto& t : d["closers"]) dv.closers.insert(t.get<int>());
                 if (d.contains("members")) for (auto& t : d["members"]) dv.members.insert(t.get<int>());
+                if (d.contains("quote_members")) for (auto& t : d["quote_members"]) dv.quote_members.insert(t.get<int>());
                 dv.cap = d.value("cap", 8); dv.succ = d.value("succ", 0);
                 dv.of = d.value("of", std::string("")); dv.of_shift = d.value("of_shift", 0);
                 p.derived.push_back(std::move(dv));
@@ -280,6 +281,15 @@ struct Package {
                 int pp = -1;
                 for (int i = 0; i < n; i++) if (d.members.count(ctx[i])) pp = i;
                 feats[d.id] = pp >= 0 ? std::min(n - 1 - pp, d.cap) : d.cap + 1;
+            } else if (d.kind == "dstate") {                   // RHETORICAL STATE (bucket x parity)
+                int pp = -1, qc = 0;
+                for (int i = 0; i < n; i++) {
+                    if (d.members.count(ctx[i])) pp = i;
+                    if (d.quote_members.count(ctx[i])) qc++;
+                }
+                int since = pp >= 0 ? std::min(n - 1 - pp, 33) : 34;
+                int bucket = (since > 2) + (since > 6) + (since > 14) + (since > 32);
+                feats[d.id] = bucket * 2 + qc % 2;
             } else if (d.kind == "member-parity") {            // DISCOURSE: quotation scope
                 int c = 0;
                 for (int t : ctx) c += (int)d.members.count(t);
