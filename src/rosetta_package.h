@@ -39,7 +39,9 @@ struct Idiom {                                                   // TRUSTED tier
     std::map<std::pair<int, int>, int> dtable;                   // dgate: (feature, last) -> out
     std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
 };
-struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members, avoid; int cap = 8, succ = 0, of_shift = 0; };
+struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members, avoid, entity_members, value_members;
+        int within = 7;
+        std::vector<int> slot; int cap = 8, succ = 0, of_shift = 0; };
 struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; int stratum = 1; };
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
@@ -93,6 +95,10 @@ struct Package {
                 if (d.contains("quote_members")) for (auto& t : d["quote_members"]) dv.quote_members.insert(t.get<int>());
                 dv.cap = d.value("cap", 8); dv.succ = d.value("succ", 0);
                 if (d.contains("avoid")) for (auto& t : d["avoid"]) dv.avoid.insert(t.get<int>());
+                if (d.contains("entity_members")) for (auto& t : d["entity_members"]) dv.entity_members.insert(t.get<int>());
+                if (d.contains("value_members")) for (auto& t : d["value_members"]) dv.value_members.insert(t.get<int>());
+                dv.within = d.value("within", 7);
+                if (d.contains("slot")) for (auto& t : d["slot"]) dv.slot.push_back(t.get<int>());
                 dv.of = d.value("of", std::string("")); dv.of_shift = d.value("of_shift", 0);
                 p.derived.push_back(std::move(dv));
             }
@@ -306,6 +312,25 @@ struct Package {
                 int c = 0;
                 for (int t : ctx) c += (int)d.members.count(t);
                 feats[d.id] = c % 2;
+            } else if (d.kind == "estate") {                 // ENTITY-STATE REGISTER: last-
+                if (!d.slot.empty() && (n < 2 || ctx[n - 2] != d.slot[0] || ctx[n - 1] != d.slot[1])) {
+                    feats[d.id] = -1; fpos[d.id] = -1; continue;
+                }
+                int qi = -1;                                 // writer-wins (entity,value) fold
+                for (int i = n - 1; i >= 0; i--) if (d.entity_members.count(ctx[i])) { qi = i; break; }
+                int feat = -1;
+                if (qi >= 0) {
+                    for (int i = 0; i < qi; i++) {
+                        if (ctx[i] != ctx[qi]) continue;
+                        bool clean = true;
+                        for (int j = i + 1; j <= i + 3 && j < n; j++)
+                            if (d.avoid.count(ctx[j])) { clean = false; break; }
+                        if (!clean) continue;
+                        for (int j = i + 1; j <= i + d.within && j < n; j++)
+                            if (d.value_members.count(ctx[j])) { feat = ctx[j]; break; }
+                    }
+                }
+                feats[d.id] = feat; fpos[d.id] = qi;
             } else if (d.kind == "prev-occ") {                 // CHAINED role (entity echo with succ)
                 auto bi = fpos.find(d.of);
                 int bp = bi == fpos.end() ? -1 : bi->second, q = -1;
