@@ -31,14 +31,16 @@ struct Idiom {                                                   // TRUSTED tier
     std::vector<std::pair<int, int>> eq;                         // relation: eq-guard offset pairs
     int copy_off = 0;                                            // relation: copy offset
     double conf = -1.0;                                          // optional confidence (trusted kinds)
+    std::map<int, double> confs;                                 // gate: per-key confidence (sw cover)
 };
-struct NGram { int out; std::string basis, cite; double det = -1.0; };  // GATED tier (observational)
+struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; };  // GATED tier
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
 struct Package {
     std::vector<Idiom> idioms;                                   // TRUSTED, in priority order
     std::vector<std::map<Ctx, NGram>> ngrams;                    // index = suffix length; GATED
     int W = 0, n_rules = 0;
+    std::string cover;                                           // "" = tiered; "support-weighted" = argmax-confidence
 
     static std::string cite_of(const json& r) {
         if (r.contains("citation") && r["citation"].is_array() && !r["citation"].empty()) {
@@ -67,6 +69,7 @@ struct Package {
         if (!m.contains("rules") || !m["rules"].is_array())
             throw std::runtime_error("rosetta package: " + manifest_path + " is missing a \"rules\" array");
         Package p;
+        p.cover = m.value("cover", std::string(""));
         int maxlen = 0;
         for (auto& r : m["rules"])
             if (r.value("kind", std::string("ngram")) == "ngram")
@@ -82,10 +85,13 @@ struct Package {
                 if (kind == "ngram") {
                     Ctx ctx = r.at("ctx").get<Ctx>();
                     p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")),
-                                                 cite, r.value("determinism", -1.0)};
+                                                 cite, r.value("determinism", -1.0), r.value("confidence", -1.0)};
                 } else if (kind == "gate") {
                     Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.slot = r.at("slot").get<int>(); id.table = imap(r.at("table"));
+                    if (r.contains("confs"))
+                        for (auto it = r["confs"].begin(); it != r["confs"].end(); ++it)
+                            id.confs[std::stoi(it.key())] = it.value().get<double>();
                     p.idioms.push_back(std::move(id));
                 } else if (kind == "compose") {
                     Idiom id; id.kind = "compose"; id.id = r.value("id", -1); id.cite = cite;
@@ -178,6 +184,65 @@ struct Package {
                 return Decision{ctx[bestj + r->L], "trusted", "causal", r->cite, r->id, r->conf};
         }
         return std::nullopt;                                    // ABSTAIN
+    }
+
+    // SUPPORT-WEIGHTED cover (manifest cover: "support-weighted"): every applicable rule fires and the
+    // answer with the highest confidence wins -- the argmax policy whose dominance over every fixed
+    // priority is kernel-checked (i-orca Arbitration.thy, argmax_policy_optimal), with calibration as
+    // the stated premise. Ties keep the FIRST candidate: idioms in manifest order (the learner's
+    // admitted order), then n-grams longest-first. Port of serve_package.py serve_sw.
+    std::optional<Decision> serve_sw(const Ctx& ctx) const {
+        int n = (int)ctx.size();
+        std::optional<Decision> best;
+        double bestc = -1e18;
+        auto consider = [&](int ans, double c, Decision d) {
+            if (c > bestc) { d.answer = ans; d.conf = c; best = d; bestc = c; }
+        };
+        for (const auto& r : idioms) {
+            if (r.kind == "gate") {
+                bool ok = true;
+                for (auto& [o, t] : r.frame) if (o > n || ctx[n - o] != t) { ok = false; break; }
+                if (!ok || r.slot > n) continue;
+                auto it = r.table.find(ctx[n - r.slot]);
+                if (it == r.table.end()) continue;
+                auto ci = r.confs.find(ctx[n - r.slot]);
+                consider(it->second, ci == r.confs.end() ? 0.0 : ci->second,
+                         Decision{0, "gated", "observational", r.cite, r.id});
+            } else if (r.kind == "relation") {
+                int need = r.copy_off;
+                bool ok = true;
+                for (auto& ij : r.eq) need = std::max({need, ij.first, ij.second});
+                if (need > n) continue;
+                for (auto& ij : r.eq) if (ctx[n - ij.first] != ctx[n - ij.second]) { ok = false; break; }
+                if (ok) consider(ctx[n - r.copy_off], r.conf < 0 ? 0.0 : r.conf,
+                                 Decision{0, "trusted", "causal", r.cite, r.id});
+            } else if (r.kind == "induction") {
+                int L = r.L;
+                if (n <= L) continue;
+                int bestj = -1;
+                for (int j = 0; j + L < n; j++) {
+                    bool m2 = true;
+                    for (int q = 0; q < L; q++) if (ctx[j + q] != ctx[n - L + q]) { m2 = false; break; }
+                    if (m2) bestj = j;
+                }
+                if (bestj >= 0)
+                    consider(ctx[bestj + L], r.conf < 0 ? 0.0 : r.conf,
+                             Decision{0, "trusted", "causal", r.cite, r.id});
+            }
+        }
+        for (int k = std::min(n, W); k >= 1; k--) {
+            Ctx suffix(ctx.end() - k, ctx.end());
+            auto it = ngrams[k].find(suffix);
+            if (it != ngrams[k].end())
+                consider(it->second.out, it->second.conf < 0 ? 0.0 : it->second.conf,
+                         Decision{0, "gated", it->second.basis, it->second.cite, -1});
+        }
+        return best;
+    }
+
+    // dispatch on the manifest's declared cover semantics
+    std::optional<Decision> decide(const Ctx& ctx) const {
+        return cover == "support-weighted" ? serve_sw(ctx) : serve(ctx);
     }
 };
 

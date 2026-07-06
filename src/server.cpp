@@ -749,7 +749,7 @@ int main(int argc, char** argv) {
                     if (qn <= 0) { a = json{{"answer", ""}, {"kind", "abstain"}}; }
                     else {
                         std::vector<int> qctx(qids, qids + qn);
-                        auto qd = pk.serve(qctx);
+                        auto qd = pk.decide(qctx);
                         if (qd) {
                             char qbuf[512];
                             int qm = tk_decode(tok, (unsigned)qd->answer, qbuf, sizeof qbuf);
@@ -783,7 +783,7 @@ int main(int argc, char** argv) {
             int n = tk_encode(tok, line.c_str(), ids, 256);
             if (n < 0) { printf("(tokenize error)\n"); continue; }
             std::vector<int> ctx(ids, ids + n);
-            auto d = pk.serve(ctx);
+            auto d = pk.decide(ctx);
             if (d) {
                 int m = tk_decode(tok, (unsigned)d->answer, buf, sizeof buf);
                 std::string ans = m > 0 ? std::string(buf, m) : ("#" + std::to_string(d->answer));
