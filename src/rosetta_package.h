@@ -38,7 +38,7 @@ struct Idiom {                                                   // TRUSTED tier
     std::map<std::pair<int, int>, int> dtable;                   // dgate: (feature, last) -> out
     std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
 };
-struct Derived { std::string id, kind; std::set<int> openers, closers, members; int cap = 8; };
+struct Derived { std::string id, kind; std::set<int> openers, closers, members; int cap = 8, succ = 0; };
 struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; };  // GATED tier
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
@@ -87,7 +87,7 @@ struct Package {
                 if (d.contains("openers")) for (auto& t : d["openers"]) dv.openers.insert(t.get<int>());
                 if (d.contains("closers")) for (auto& t : d["closers"]) dv.closers.insert(t.get<int>());
                 if (d.contains("members")) for (auto& t : d["members"]) dv.members.insert(t.get<int>());
-                dv.cap = d.value("cap", 8);
+                dv.cap = d.value("cap", 8); dv.succ = d.value("succ", 0);
                 p.derived.push_back(std::move(dv));
             }
         int maxlen = 0;
@@ -240,19 +240,21 @@ struct Package {
         std::map<std::string, int> feats;                       // derived predicates (PROVED extractors)
         for (const auto& d : derived) {
             if (d.kind == "bracket-mate") {
-                std::vector<int> stack;
-                for (int t : ctx) {
-                    if (d.openers.count(t)) stack.push_back(t);
-                    else if (d.closers.count(t) && !stack.empty()) stack.pop_back();
+                std::vector<int> stack;                        // positions; "succ" composes the role
+                for (int i = 0; i < n; i++) {
+                    if (d.openers.count(ctx[i])) stack.push_back(i);
+                    else if (d.closers.count(ctx[i]) && !stack.empty()) stack.pop_back();
                 }
-                feats[d.id] = stack.empty() ? -1 : stack.back();
+                int p2 = stack.empty() ? -1 : stack.back() + d.succ;
+                feats[d.id] = (!stack.empty() && p2 >= 0 && p2 < n) ? ctx[p2] : -1;
             } else if (d.kind == "recent-member" || d.kind == "recent-unique") {
                 std::map<int, int> cnt;
                 if (d.kind == "recent-unique") for (int t : ctx) cnt[t]++;
-                int f = -1;
-                for (int t : ctx)
-                    if (d.members.count(t) && (d.kind == "recent-member" || cnt[t] == 1)) f = t;
-                feats[d.id] = f;
+                int pp = -1;
+                for (int i = 0; i < n; i++)
+                    if (d.members.count(ctx[i]) && (d.kind == "recent-member" || cnt[ctx[i]] == 1)) pp = i;
+                int p2 = pp < 0 ? -1 : pp + d.succ;
+                feats[d.id] = (pp >= 0 && p2 >= 0 && p2 < n) ? ctx[p2] : -1;
             } else if (d.kind == "bracket-depth") {
                 int depth = 0;
                 for (int t : ctx) depth += (int)d.openers.count(t) - (int)d.closers.count(t);
