@@ -262,6 +262,14 @@ struct Package {
                 int depth = 0;
                 for (int t : ctx) depth += (int)d.openers.count(t) - (int)d.closers.count(t);
                 feats[d.id] = std::min(std::max(depth, 0), d.cap);
+            } else if (d.kind == "since-member") {             // DISCOURSE: tokens since last member
+                int pp = -1;
+                for (int i = 0; i < n; i++) if (d.members.count(ctx[i])) pp = i;
+                feats[d.id] = pp >= 0 ? std::min(n - 1 - pp, d.cap) : d.cap + 1;
+            } else if (d.kind == "member-parity") {            // DISCOURSE: quotation scope
+                int c = 0;
+                for (int t : ctx) c += (int)d.members.count(t);
+                feats[d.id] = c % 2;
             } else if (d.kind == "prev-occ") {                 // CHAINED role (entity echo with succ)
                 auto bi = fpos.find(d.of);
                 int bp = bi == fpos.end() ? -1 : bi->second, q = -1;
