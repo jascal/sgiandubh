@@ -38,7 +38,7 @@ struct Idiom {                                                   // TRUSTED tier
     std::map<std::pair<int, int>, int> dtable;                   // dgate: (feature, last) -> out
     std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
 };
-struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members; int cap = 8, succ = 0, of_shift = 0; };
+struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members, avoid; int cap = 8, succ = 0, of_shift = 0; };
 struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; };  // GATED tier
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
@@ -89,6 +89,7 @@ struct Package {
                 if (d.contains("members")) for (auto& t : d["members"]) dv.members.insert(t.get<int>());
                 if (d.contains("quote_members")) for (auto& t : d["quote_members"]) dv.quote_members.insert(t.get<int>());
                 dv.cap = d.value("cap", 8); dv.succ = d.value("succ", 0);
+                if (d.contains("avoid")) for (auto& t : d["avoid"]) dv.avoid.insert(t.get<int>());
                 dv.of = d.value("of", std::string("")); dv.of_shift = d.value("of_shift", 0);
                 p.derived.push_back(std::move(dv));
             }
@@ -298,7 +299,13 @@ struct Package {
                 auto bi = fpos.find(d.of);
                 int bp = bi == fpos.end() ? -1 : bi->second, q = -1;
                 if (bp >= 0 && d.of_shift) { bp += d.of_shift; if (bp < 0 || bp >= n) bp = -1; }
-                if (bp >= 0) for (int i = 0; i < bp; i++) if (ctx[i] == ctx[bp]) q = i;
+                if (bp >= 0) for (int i = 0; i < bp; i++) {
+                    if (ctx[i] != ctx[bp]) continue;
+                    bool ok2 = true;
+                    for (int j = i + 1; j <= i + 3 && j < n; j++)
+                        if (d.avoid.count(ctx[j])) { ok2 = false; break; }
+                    if (ok2) q = i;
+                }
                 fpos[d.id] = q;
                 int p2 = q < 0 ? -1 : q + d.succ;
                 feats[d.id] = (q >= 0 && p2 >= 0 && p2 < n) ? ctx[p2] : -1;
