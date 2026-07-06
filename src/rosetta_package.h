@@ -32,13 +32,13 @@ struct Idiom {                                                   // TRUSTED tier
     int copy_off = 0;                                            // relation: copy offset
     double conf = -1.0;                                          // optional confidence (trusted kinds)
     std::map<int, double> confs;                                 // gate: per-key confidence (sw cover)
-    std::string feature;                                         // dgate: derived-feature id
+    std::string feature, featureB;                               // dgate: derived-feature id(s)
     int lmax = 6;                                                // pointer: max match depth
     std::map<std::pair<int, int>, double> cells;                 // pointer: (l, lc) -> confidence
     std::map<std::pair<int, int>, int> dtable;                   // dgate: (feature, last) -> out
     std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
 };
-struct Derived { std::string id, kind, of; std::set<int> openers, closers, members; int cap = 8, succ = 0; };
+struct Derived { std::string id, kind, of; std::set<int> openers, closers, members; int cap = 8, succ = 0, of_shift = 0; };
 struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; };  // GATED tier
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
@@ -88,7 +88,7 @@ struct Package {
                 if (d.contains("closers")) for (auto& t : d["closers"]) dv.closers.insert(t.get<int>());
                 if (d.contains("members")) for (auto& t : d["members"]) dv.members.insert(t.get<int>());
                 dv.cap = d.value("cap", 8); dv.succ = d.value("succ", 0);
-                dv.of = d.value("of", std::string(""));
+                dv.of = d.value("of", std::string("")); dv.of_shift = d.value("of_shift", 0);
                 p.derived.push_back(std::move(dv));
             }
         int maxlen = 0;
@@ -131,6 +131,20 @@ struct Package {
                         auto k = it.key(); auto c = k.find(':');
                         id.cells[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                     }
+                    p.idioms.push_back(std::move(id));
+                } else if (kind == "dgate2") {                  // PAIR gate: two features jointly
+                    Idiom id; id.kind = "dgate2"; id.id = r.value("id", -1); id.cite = cite;
+                    id.feature = r.at("featureA").get<std::string>();
+                    id.featureB = r.at("featureB").get<std::string>();
+                    for (auto it = r["table"].begin(); it != r["table"].end(); ++it) {
+                        auto k = it.key(); auto c = k.find(':');
+                        id.dtable[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<int>();
+                    }
+                    if (r.contains("confs"))
+                        for (auto it = r["confs"].begin(); it != r["confs"].end(); ++it) {
+                            auto k = it.key(); auto c = k.find(':');
+                            id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
+                        }
                     p.idioms.push_back(std::move(id));
                 } else if (kind == "dgate") {                   // TWO-LAYER: gate over a derived predicate
                     Idiom id; id.kind = "dgate"; id.id = r.value("id", -1); id.cite = cite;
@@ -176,7 +190,7 @@ struct Package {
         int n = (int)ctx.size();
         for (const auto& r : idioms) {                          // TRUSTED tier (causal) first
             if (r.kind == "induction" || r.kind == "relation" || r.kind == "dgate"
-                || r.kind == "pointer") continue;                 // routed below
+                || r.kind == "pointer" || r.kind == "dgate2") continue;   // routed below
             bool fr = true;
             for (auto& kv : r.frame) { if (kv.first > n || ctx[n - kv.first] != kv.second) { fr = false; break; } }
             if (!fr) continue;
@@ -273,6 +287,7 @@ struct Package {
             } else if (d.kind == "prev-occ") {                 // CHAINED role (entity echo with succ)
                 auto bi = fpos.find(d.of);
                 int bp = bi == fpos.end() ? -1 : bi->second, q = -1;
+                if (bp >= 0 && d.of_shift) { bp += d.of_shift; if (bp < 0 || bp >= n) bp = -1; }
                 if (bp >= 0) for (int i = 0; i < bp; i++) if (ctx[i] == ctx[bp]) q = i;
                 fpos[d.id] = q;
                 int p2 = q < 0 ? -1 : q + d.succ;
