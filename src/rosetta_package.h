@@ -32,7 +32,13 @@ struct Idiom {                                                   // TRUSTED tier
     int copy_off = 0;                                            // relation: copy offset
     double conf = -1.0;                                          // optional confidence (trusted kinds)
     std::map<int, double> confs;                                 // gate: per-key confidence (sw cover)
+    std::string feature;                                         // dgate: derived-feature id
+    int lmax = 6;                                                // pointer: max match depth
+    std::map<std::pair<int, int>, double> cells;                 // pointer: (l, lc) -> confidence
+    std::map<std::pair<int, int>, int> dtable;                   // dgate: (feature, last) -> out
+    std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
 };
+struct Derived { std::string id, kind; std::set<int> openers, closers; };
 struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; };  // GATED tier
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
@@ -41,6 +47,8 @@ struct Package {
     std::vector<std::map<Ctx, NGram>> ngrams;                    // index = suffix length; GATED
     int W = 0, n_rules = 0;
     std::string cover;                                           // "" = tiered; "support-weighted" = argmax-confidence
+    std::vector<Derived> derived;                                // two-layer: feature extractors
+    std::map<int, int> cmap;                                     // concepts: member -> representative
 
     static std::string cite_of(const json& r) {
         if (r.contains("citation") && r["citation"].is_array() && !r["citation"].empty()) {
@@ -70,6 +78,16 @@ struct Package {
             throw std::runtime_error("rosetta package: " + manifest_path + " is missing a \"rules\" array");
         Package p;
         p.cover = m.value("cover", std::string(""));
+        if (m.contains("concepts"))
+            for (auto it = m["concepts"].begin(); it != m["concepts"].end(); ++it)
+                for (auto& mm : it.value()) p.cmap[mm.get<int>()] = std::stoi(it.key());
+        if (m.contains("derived"))
+            for (auto& d : m["derived"]) {
+                Derived dv; dv.id = d.value("id", std::string("")); dv.kind = d.value("kind", std::string(""));
+                if (d.contains("openers")) for (auto& t : d["openers"]) dv.openers.insert(t.get<int>());
+                if (d.contains("closers")) for (auto& t : d["closers"]) dv.closers.insert(t.get<int>());
+                p.derived.push_back(std::move(dv));
+            }
         int maxlen = 0;
         for (auto& r : m["rules"])
             if (r.value("kind", std::string("ngram")) == "ngram")
@@ -103,6 +121,27 @@ struct Package {
                     id.conf = r.value("confidence", -1.0);
                     id.L = r.at("L").get<int>();
                     p.idioms.push_back(std::move(id));
+                } else if (kind == "pointer") {                 // generalized copy: (l, lc)-cell scorer
+                    Idiom id; id.kind = "pointer"; id.id = r.value("id", -1); id.cite = cite;
+                    id.lmax = r.value("lmax", 6);
+                    for (auto it = r["cells"].begin(); it != r["cells"].end(); ++it) {
+                        auto k = it.key(); auto c = k.find(':');
+                        id.cells[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
+                    }
+                    p.idioms.push_back(std::move(id));
+                } else if (kind == "dgate") {                   // TWO-LAYER: gate over a derived predicate
+                    Idiom id; id.kind = "dgate"; id.id = r.value("id", -1); id.cite = cite;
+                    id.feature = r.at("feature").get<std::string>();
+                    for (auto it = r["table"].begin(); it != r["table"].end(); ++it) {
+                        auto k = it.key(); auto c = k.find(':');
+                        id.dtable[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<int>();
+                    }
+                    if (r.contains("confs"))
+                        for (auto it = r["confs"].begin(); it != r["confs"].end(); ++it) {
+                            auto k = it.key(); auto c = k.find(':');
+                            id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
+                        }
+                    p.idioms.push_back(std::move(id));
                 } else if (kind == "relation") {                // causal EQ-GUARD + COPY, routed OOD
                     Idiom id; id.kind = "relation"; id.id = r.value("id", -1); id.cite = cite;
                     id.conf = r.value("confidence", -1.0);
@@ -133,7 +172,8 @@ struct Package {
     std::optional<Decision> serve(const Ctx& ctx) const {
         int n = (int)ctx.size();
         for (const auto& r : idioms) {                          // TRUSTED tier (causal) first
-            if (r.kind == "induction" || r.kind == "relation") continue;  // routed OOD, below the n-gram tier
+            if (r.kind == "induction" || r.kind == "relation" || r.kind == "dgate"
+                || r.kind == "pointer") continue;                 // routed below
             bool fr = true;
             for (auto& kv : r.frame) { if (kv.first > n || ctx[n - kv.first] != kv.second) { fr = false; break; } }
             if (!fr) continue;
@@ -195,11 +235,51 @@ struct Package {
         int n = (int)ctx.size();
         std::optional<Decision> best;
         double bestc = -1e18;
+        std::map<std::string, int> feats;                       // derived predicates (PROVED extractors)
+        for (const auto& d : derived) {
+            if (d.kind == "bracket-mate") {
+                std::vector<int> stack;
+                for (int t : ctx) {
+                    if (d.openers.count(t)) stack.push_back(t);
+                    else if (d.closers.count(t) && !stack.empty()) stack.pop_back();
+                }
+                feats[d.id] = stack.empty() ? -1 : stack.back();
+            }
+        }
         auto consider = [&](int ans, double c, Decision d) {
             if (c > bestc) { d.answer = ans; d.conf = c; best = d; bestc = c; }
         };
+        auto crep = [&](int t) { auto it = cmap.find(t); return it == cmap.end() ? t : it->second; };
         for (const auto& r : idioms) {
-            if (r.kind == "gate") {
+            if (r.kind == "pointer") {
+                int bl = -1, blc = -1, bp = -1;
+                for (int pp = 1; pp < n; pp++) {
+                    int l = 0, lc = 0;
+                    for (int j = 1; j <= r.lmax && pp - j >= 0; j++) {
+                        int a = ctx[pp - j], b = ctx[n - j];
+                        if (l == j - 1 && a == b) l = j;
+                        if (lc == j - 1 && crep(a) == crep(b)) lc = j;
+                        if (lc < j) break;
+                    }
+                    if ((l >= 1 || lc >= 2)
+                        && std::make_tuple(l, lc, pp) >= std::make_tuple(bl, blc, bp)) {
+                        bl = l; blc = lc; bp = pp;
+                    }
+                }
+                if (bp >= 0) {
+                    auto it = r.cells.find({bl, blc});
+                    if (it != r.cells.end())
+                        consider(ctx[bp], it->second, Decision{0, "trusted", "causal", r.cite, r.id});
+                }
+            } else if (r.kind == "dgate") {
+                auto fi = feats.find(r.feature);
+                if (fi == feats.end() || fi->second < 0 || n < 1) continue;
+                auto it = r.dtable.find({fi->second, ctx[n - 1]});
+                if (it == r.dtable.end()) continue;
+                auto ci = r.dconfs.find({fi->second, ctx[n - 1]});
+                consider(it->second, ci == r.dconfs.end() ? 0.0 : ci->second,
+                         Decision{0, "gated", "observational", r.cite, r.id});
+            } else if (r.kind == "gate") {
                 bool ok = true;
                 for (auto& [o, t] : r.frame) if (o > n || ctx[n - o] != t) { ok = false; break; }
                 if (!ok || r.slot > n) continue;
