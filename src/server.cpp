@@ -748,16 +748,32 @@ int main(int argc, char** argv) {
                     int qn = tk_encode(tok, q.c_str(), qids, 512);
                     if (qn <= 0) { a = json{{"answer", ""}, {"kind", "abstain"}}; }
                     else {
+                        // CHAIN mode: greedy multi-token completion (stop at 12 steps, a low-
+                        // confidence step, or sentence end) -- a spoke consumed by a hub LLM
+                        // needs the fact, not one token.
                         std::vector<int> qctx(qids, qids + qn);
-                        auto qd = pk.decide(qctx);
-                        if (qd) {
+                        std::string out, cite, route;
+                        double minconf = 1e9;
+                        for (int step = 0; step < 12; step++) {
+                            auto qd = pk.decide(qctx);
+                            if (!qd) break;
+                            if (qd->conf >= 0 && qd->conf < 0.30 && step > 0) break;
                             char qbuf[512];
                             int qm = tk_decode(tok, (unsigned)qd->answer, qbuf, sizeof qbuf);
-                            a["answer"] = qm > 0 ? std::string(qbuf, qm) : ("#" + std::to_string(qd->answer));
+                            std::string piece = qm > 0 ? std::string(qbuf, qm) : "";
+                            if (step == 0) { cite = qd->citation; route = qd->tier + "/" + qd->basis; }
+                            if (qd->conf >= 0) minconf = std::min(minconf, qd->conf);
+                            out += piece;
+                            qctx.push_back(qd->answer);
+                            if (piece.find('.') != std::string::npos && step > 0) break;
+                        }
+                        while (!out.empty() && (out.back() == ' ')) out.pop_back();
+                        if (!out.empty() && out != " ") {
+                            a["answer"] = out;
                             a["kind"] = "distilled";
-                            a["citation"] = qd->citation;
-                            a["route"] = qd->tier + "/" + qd->basis;
-                            if (qd->conf >= 0) a["confidence"] = qd->conf;
+                            a["citation"] = cite;
+                            a["route"] = route;
+                            if (minconf < 1e9) a["confidence"] = minconf;
                         } else a = json{{"answer", ""}, {"kind", "abstain"}};
                     }
                 }
