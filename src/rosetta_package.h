@@ -31,6 +31,7 @@ struct Idiom {                                                   // TRUSTED tier
     std::vector<std::pair<int, int>> eq;                         // relation: eq-guard offset pairs
     int copy_off = 0;                                            // relation: copy offset
     double conf = -1.0;                                          // optional confidence (trusted kinds)
+    int stratum = 1;                                             // labeled trust pool (fall-through)
     std::map<int, double> confs;                                 // gate: per-key confidence (sw cover)
     std::string feature, featureB;                               // dgate: derived-feature id(s)
     int lmax = 6;                                                // pointer: max match depth
@@ -39,7 +40,7 @@ struct Idiom {                                                   // TRUSTED tier
     std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
 };
 struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members, avoid; int cap = 8, succ = 0, of_shift = 0; };
-struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; };  // GATED tier
+struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; int stratum = 1; };
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
 struct Package {
@@ -47,6 +48,7 @@ struct Package {
     std::vector<std::map<Ctx, NGram>> ngrams;                    // index = suffix length; GATED
     int W = 0, n_rules = 0;
     std::string cover;                                           // "" = tiered; "support-weighted" = argmax-confidence
+    double strata_tau = 0.35;                                    // stratum-1 confidence floor
     std::vector<Derived> derived;                                // two-layer: feature extractors
     std::map<int, int> cmap;                                     // concepts: member -> representative
 
@@ -78,6 +80,7 @@ struct Package {
             throw std::runtime_error("rosetta package: " + manifest_path + " is missing a \"rules\" array");
         Package p;
         p.cover = m.value("cover", std::string(""));
+        p.strata_tau = m.value("strata_tau", 0.35);
         if (m.contains("concepts"))
             for (auto it = m["concepts"].begin(); it != m["concepts"].end(); ++it)
                 for (auto& mm : it.value()) p.cmap[mm.get<int>()] = std::stoi(it.key());
@@ -108,7 +111,8 @@ struct Package {
                 if (kind == "ngram") {
                     Ctx ctx = r.at("ctx").get<Ctx>();
                     p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")),
-                                                 cite, r.value("determinism", -1.0), r.value("confidence", -1.0)};
+                                                 cite, r.value("determinism", -1.0), r.value("confidence", -1.0),
+                                                 r.value("stratum", 1)};
                 } else if (kind == "gate") {
                     Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.slot = r.at("slot").get<int>(); id.table = imap(r.at("table"));
@@ -171,6 +175,13 @@ struct Package {
             } catch (const json::exception& e) {
                 throw std::runtime_error("rosetta package: rule #" + std::to_string(ri) + " (" + kind + ") in "
                                          + manifest_path + " is malformed — " + e.what());
+            }
+        }
+        {   // stratum backfill: idioms were appended in manifest order over non-ngram rules
+            size_t si = 0;
+            for (auto& r : m["rules"]) {
+                if (r.value("kind", std::string("ngram")) != "ngram" && si < p.idioms.size())
+                    p.idioms[si++].stratum = r.value("stratum", 1);
             }
         }
         p.n_rules = (int)(p.idioms.size());
@@ -252,8 +263,8 @@ struct Package {
     // admitted order), then n-grams longest-first. Port of serve_package.py serve_sw.
     std::optional<Decision> serve_sw(const Ctx& ctx) const {
         int n = (int)ctx.size();
-        std::optional<Decision> best;
-        double bestc = -1e18;
+        std::optional<Decision> best, best2;
+        double bestc = -1e18, bestc2 = -1e18;
         std::map<std::string, int> feats, fpos;                 // derived predicates (PROVED extractors)
         for (const auto& d : derived) {
             if (d.kind == "bracket-mate") {
@@ -311,8 +322,9 @@ struct Package {
                 feats[d.id] = (q >= 0 && p2 >= 0 && p2 < n) ? ctx[p2] : -1;
             }
         }
-        auto consider = [&](int ans, double c, Decision d) {
-            if (c > bestc) { d.answer = ans; d.conf = c; best = d; bestc = c; }
+        auto consider = [&](int ans, double c, Decision d, int stratum = 1) {
+            if (stratum <= 1) { if (c > bestc) { d.answer = ans; d.conf = c; best = d; bestc = c; } }
+            else if (c > bestc2) { d.answer = ans; d.conf = c; best2 = d; bestc2 = c; }
         };
         auto crep = [&](int t) { auto it = cmap.find(t); return it == cmap.end() ? t : it->second; };
         for (const auto& r : idioms) {
@@ -343,7 +355,7 @@ struct Package {
                 if (it == r.dtable.end()) continue;
                 auto ci = r.dconfs.find({fi->second, ctx[n - 1]});
                 consider(it->second, ci == r.dconfs.end() ? 0.0 : ci->second,
-                         Decision{0, "gated", "observational", r.cite, r.id});
+                         Decision{0, "gated", "observational", r.cite, r.id}, r.stratum);
             } else if (r.kind == "gate") {
                 bool ok = true;
                 for (auto& [o, t] : r.frame) if (o > n || ctx[n - o] != t) { ok = false; break; }
@@ -352,7 +364,7 @@ struct Package {
                 if (it == r.table.end()) continue;
                 auto ci = r.confs.find(ctx[n - r.slot]);
                 consider(it->second, ci == r.confs.end() ? 0.0 : ci->second,
-                         Decision{0, "gated", "observational", r.cite, r.id});
+                         Decision{0, "gated", "observational", r.cite, r.id}, r.stratum);
             } else if (r.kind == "relation") {
                 int need = r.copy_off;
                 bool ok = true;
@@ -360,7 +372,7 @@ struct Package {
                 if (need > n) continue;
                 for (auto& ij : r.eq) if (ctx[n - ij.first] != ctx[n - ij.second]) { ok = false; break; }
                 if (ok) consider(ctx[n - r.copy_off], r.conf < 0 ? 0.0 : r.conf,
-                                 Decision{0, "trusted", "causal", r.cite, r.id});
+                                 Decision{0, "trusted", "causal", r.cite, r.id}, r.stratum);
             } else if (r.kind == "induction") {
                 int L = r.L;
                 if (n <= L) continue;
@@ -380,8 +392,11 @@ struct Package {
             auto it = ngrams[k].find(suffix);
             if (it != ngrams[k].end())
                 consider(it->second.out, it->second.conf < 0 ? 0.0 : it->second.conf,
-                         Decision{0, "gated", it->second.basis, it->second.cite, -1});
+                         Decision{0, "gated", it->second.basis, it->second.cite, -1},
+                         it->second.stratum);
         }
+        if (best && bestc >= strata_tau) return best;
+        if (best2 && bestc2 > bestc) return best2;
         return best;
     }
 
