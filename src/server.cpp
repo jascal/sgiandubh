@@ -728,8 +728,13 @@ int main(int argc, char** argv) {
         // No souffle engine, no per-item index.json: load manifest.json (the tiered cover) + the model's BPE tokenizer,
         // then serve queries: tokenize → trusted idioms → gated n-grams → ABSTAIN (port of rosetta/py/serve_package.py).
         rosetta::Package pk;
+        std::string grounding;
         try { pk = rosetta::Package::load(g_pkg + "/manifest.json"); }
         catch (const std::exception& e) { fprintf(stderr, "sgiandubh: %s\n", e.what()); return 1; }
+        if (!pk.grounding_path.empty()) {
+            std::ifstream gf(g_pkg + "/" + pk.grounding_path);
+            if (gf) grounding.assign(std::istreambuf_iterator<char>(gf), {});
+        }
         Tokenizer* tok = tk_new((g_pkg + "/bundle.tokenizer.json").c_str());
         if (!tok) { fprintf(stderr, "sgiandubh: --rosetta-package needs %s/bundle.tokenizer.json\n", g_pkg.c_str()); return 1; }
         if (!g_repl) {  // HTTP SPOKE mode: an OpenAI endpoint claymore can federate (abstain = kind:"abstain")
@@ -787,6 +792,16 @@ int main(int argc, char** argv) {
                                 a["canonical"] = canon_q;    // actually answered
                                 a["entity"] = canon_ent;
                             }
+                            if (!grounding.empty()) {        // ATTESTATION (stratum 0): the
+                                std::string stmt = q + out;  // served statement is verbatim
+                                auto gpos = grounding.find(stmt);   // in the source sidecar
+                                if (gpos != std::string::npos) {
+                                    a["stratum"] = 0;
+                                    a["attested"] = true;
+                                    size_t gb = gpos > 40 ? gpos - 40 : 0;
+                                    a["quote"] = grounding.substr(gb, stmt.size() + 80);
+                                }
+                            }
                         } else a = json{{"answer", ""}, {"kind", "abstain"}};
                     }
                 }
@@ -796,8 +811,8 @@ int main(int argc, char** argv) {
                     {"message", json{{"role", "assistant"}, {"content", a.dump()}}}}});
                 rs.set_content(out.dump(), "application/json");
             });
-            fprintf(stderr, "sgiandubh rosetta-package SPOKE: %d rules (%zu trusted, W=%d, canon=%zu) · next-token expert · listening :%d\n",
-                    pk.n_rules, pk.idioms.size(), pk.W, pk.canon_templates.size(), port);
+            fprintf(stderr, "sgiandubh rosetta-package SPOKE: %d rules (%zu trusted, W=%d, canon=%zu, grounding=%zu) · next-token expert · listening :%d\n",
+                    pk.n_rules, pk.idioms.size(), pk.W, pk.canon_templates.size(), grounding.size(), port);
             rsrv.listen("0.0.0.0", port);
             tk_free(tok);
             return 0;

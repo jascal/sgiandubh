@@ -32,6 +32,7 @@ struct Idiom {                                                   // TRUSTED tier
     int copy_off = 0;                                            // relation: copy offset
     double conf = -1.0;                                          // optional confidence (trusted kinds)
     int stratum = 1;                                             // labeled trust pool (fall-through)
+    std::string origin;                                          // document | teacher | feedback
     std::map<int, double> confs;                                 // gate: per-key confidence (sw cover)
     std::string feature, featureB;                               // dgate: derived-feature id(s)
     int lmax = 6;                                                // pointer: max match depth
@@ -44,7 +45,7 @@ struct Derived { std::string id, kind, of; std::set<int> openers, closers, membe
         std::vector<int> slot;
         std::set<int> entities, locations, objects, move_verbs, take_verbs, drop_verbs;
         std::string mode = "is"; int cap = 8, succ = 0, of_shift = 0; };
-struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; int stratum = 1; };
+struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; int stratum = 1; std::string origin; };
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
 struct Package {
@@ -56,6 +57,7 @@ struct Package {
     std::vector<CanonTemplate> canon_templates;                  // mined template inventory
     std::map<std::string, std::string> canon_entities;           // lowercase -> proper form
     double strata_tau = 0.35;                                    // stratum-1 confidence floor
+    std::string origin, origin_model, grounding_path;            // unified-spec provenance
     std::vector<Derived> derived;                                // two-layer: feature extractors
     std::map<int, int> cmap;                                     // concepts: member -> representative
 
@@ -88,6 +90,9 @@ struct Package {
         Package p;
         p.cover = m.value("cover", std::string(""));
         p.strata_tau = m.value("strata_tau", 0.35);
+        p.origin = m.value("origin", std::string("teacher"));
+        p.origin_model = m.value("origin_model", std::string(""));
+        p.grounding_path = m.value("grounding", std::string(""));
         if (m.contains("canon")) {
             for (auto& e : m["canon"]["entities"]) {
                 std::string en = e.get<std::string>(), lo = en;
@@ -147,23 +152,24 @@ struct Package {
                     p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")),
                                                  cite, r.value("determinism", -1.0), r.value("confidence", -1.0),
                                                  r.value("stratum", 1)};
+                    p.ngrams[ctx.size()][ctx].origin = r.value("origin", p.origin);
                 } else if (kind == "gate") {
                     Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.slot = r.at("slot").get<int>(); id.table = imap(r.at("table"));
                     if (r.contains("confs"))
                         for (auto it = r["confs"].begin(); it != r["confs"].end(); ++it)
                             id.confs[std::stoi(it.key())] = it.value().get<double>();
-                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "compose") {
                     Idiom id; id.kind = "compose"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.k1 = r.at("operands").at(0); id.k2 = r.at("operands").at(1);
                     id.valmap = imap(r.at("valmap")); id.sum = imap(r.at("sum"));
-                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "induction") {               // causal COPY circuit, routed OOD after n-grams
                     Idiom id; id.kind = "induction"; id.id = r.value("id", -1); id.cite = cite;
                     id.conf = r.value("confidence", -1.0);
                     id.L = r.at("L").get<int>();
-                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "pointer") {                 // generalized copy: (l, lc)-cell scorer
                     Idiom id; id.kind = "pointer"; id.id = r.value("id", -1); id.cite = cite;
                     id.lmax = r.value("lmax", 6);
@@ -171,7 +177,7 @@ struct Package {
                         auto k = it.key(); auto c = k.find(':');
                         id.cells[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                     }
-                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "dgate2") {                  // PAIR gate: two features jointly
                     Idiom id; id.kind = "dgate2"; id.id = r.value("id", -1); id.cite = cite;
                     id.feature = r.at("featureA").get<std::string>();
@@ -185,7 +191,7 @@ struct Package {
                             auto k = it.key(); auto c = k.find(':');
                             id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                         }
-                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "dgate") {                   // TWO-LAYER: gate over a derived predicate
                     Idiom id; id.kind = "dgate"; id.id = r.value("id", -1); id.cite = cite;
                     id.feature = r.at("feature").get<std::string>();
@@ -198,13 +204,13 @@ struct Package {
                             auto k = it.key(); auto c = k.find(':');
                             id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                         }
-                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "relation") {                // causal EQ-GUARD + COPY, routed OOD
                     Idiom id; id.kind = "relation"; id.id = r.value("id", -1); id.cite = cite;
                     id.conf = r.value("confidence", -1.0);
                     for (auto& ij : r.at("eq")) id.eq.emplace_back(ij.at(0).get<int>(), ij.at(1).get<int>());
                     id.copy_off = r.at("copy").get<int>();
-                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 }                                               // unknown kinds are skipped (forward-compat with newer packages)
             } catch (const json::exception& e) {
                 throw std::runtime_error("rosetta package: rule #" + std::to_string(ri) + " (" + kind + ") in "
