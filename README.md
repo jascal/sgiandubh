@@ -1,5 +1,18 @@
 # sgiandubh
 
+## Unified packages (current best practice)
+
+The modern spoke serves a **unified expert package** (rosetta `PACKAGE.md` v2 — see
+`examples/manifest.example.json`): `./build/sgiandubh --rosetta-package <dir> <port>`. Responses
+carry the full trust ladder: `origin` (document | teacher | feedback), `stratum` (0 attested /
+1 certified / 2 supported), per-rule citations, `canonical` + bindings when the query was
+canonicalized (parse-or-abstain — a failed parse abstains rather than fragment-matching), and
+`attested: true` + a quoted span when the grounding sidecar verifies the served statement.
+Build packages with rosetta (teacher route: pil wyly; document route: `py/convert_classic.py`;
+feedback route: wyly_feedback `--emit`). Classic packages (this repo's `package_*` dirs) convert
+with one command: `rosetta/py/convert_classic.py package_riscv <out>`.
+
+
 A *sgian-dubh* is the small concealed blade. This is the small, concealed expert: a **standalone, OpenAI-compatible
 server** for a **bounded domain expert** distilled out of a large model — a native C++ binary whose per-decision decode
 is a ~15-line **semiring combine** (`logit = Σ contrib`, `decide = argmax`; the formal spec is `src/engine.dl`, ported

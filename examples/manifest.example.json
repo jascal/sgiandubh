@@ -1,18 +1,110 @@
 {
-  "_comment": "Maps each query to its fieldrun-emitted decision .dl (one program for a single-token decision, or a numbered trace for a generated answer). Feed to tools/dl2package.py to build a package. Nothing domain-specific — the corpus is the config.",
-  "model": "my-domain-expert",
-  "items": [
-    {
-      "id": "item1",
-      "query": "the student-facing question or context to match against",
-      "citation": "Source §X",
-      "dl": "export/p00001_*.dl"
-    },
-    {
-      "id": "item2",
-      "query": "another in-domain question",
-      "citation": "Source §Y",
-      "dl": "export/p00002_*.dl"
-    }
-  ]
+ "_comment": "UNIFIED expert package example (rosetta PACKAGE.md v2). Serve: ./build/sgiandubh --rosetta-package <dir> <port>. Every answer cites rule+origin+evidence; everything else abstains.",
+ "model": "my-domain-expert",
+ "cover": "support-weighted",
+ "W": 6,
+ "origin": "teacher",
+ "_origin": "document | teacher | feedback -- the manifest default; rules may override",
+ "origin_model": "qwen3b",
+ "grounding": "grounding.txt",
+ "_grounding": "source text shipped with the package: enables serve-time ATTESTATION (stratum 0) with quoted spans",
+ "strata_tau": 0.35,
+ "_strata": "stratum 0=attested (assigned at serve time) / 1=certified / 2=supported (fall-through below tau; MUST be qualified on deployment queries)",
+ "canon": {
+  "entities": [
+   "Gold",
+   "Iron"
+  ],
+  "templates": [
+   {
+    "prefix": "The atomic number of {E} is",
+    "keywords": [
+     "atomic",
+     "number"
+    ],
+    "support": 1781
+   }
+  ],
+  "_comment": "mined template inventory; runtimes parse-or-ABSTAIN before key lookup and surface canonical+bindings (the silent-substitution defense). Reps must be SERVEABILITY-scored: visible to the key tiers and measured against the cover."
+ },
+ "rules": [
+  {
+   "id": 0,
+   "kind": "ngram",
+   "tier": "gated",
+   "basis": "observational",
+   "ctx": [
+    785,
+    24269,
+    1372,
+    315,
+    7421,
+    374
+   ],
+   "out": 220,
+   "support": 40,
+   "determinism": 1.0,
+   "confidence": 0.9971,
+   "origin": "teacher",
+   "citation": [
+    "online 6-gram tier (s40)"
+   ]
+  },
+  {
+   "id": 1,
+   "kind": "dgate",
+   "tier": "gated",
+   "basis": "observational",
+   "feature": "feat0",
+   "table": {
+    "5163:25": 5163
+   },
+   "confs": {
+    "5163:25": 0.83
+   },
+   "stratum": 1,
+   "citation": [
+    "estate identity gate (extractor PROVED)"
+   ]
+  },
+  {
+   "id": 2,
+   "kind": "ngram",
+   "tier": "gated",
+   "basis": "observational",
+   "ctx": [
+    11,
+    220,
+    16,
+    24
+   ],
+   "out": 13,
+   "confidence": 0.999,
+   "origin": "feedback",
+   "citation": [
+    "human-feedback patch: The atomic mass of Helium..."
+   ]
+  }
+ ],
+ "derived": [
+  {
+   "id": "feat0",
+   "kind": "estate",
+   "entity_members": [
+    7421
+   ],
+   "value_members": [
+    5163
+   ],
+   "avoid": [
+    30
+   ],
+   "within": 7,
+   "slot": [
+    362,
+    25
+   ]
+  }
+ ],
+ "concepts": {}
 }
