@@ -153,17 +153,17 @@ struct Package {
                     if (r.contains("confs"))
                         for (auto it = r["confs"].begin(); it != r["confs"].end(); ++it)
                             id.confs[std::stoi(it.key())] = it.value().get<double>();
-                    p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
                 } else if (kind == "compose") {
                     Idiom id; id.kind = "compose"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.k1 = r.at("operands").at(0); id.k2 = r.at("operands").at(1);
                     id.valmap = imap(r.at("valmap")); id.sum = imap(r.at("sum"));
-                    p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
                 } else if (kind == "induction") {               // causal COPY circuit, routed OOD after n-grams
                     Idiom id; id.kind = "induction"; id.id = r.value("id", -1); id.cite = cite;
                     id.conf = r.value("confidence", -1.0);
                     id.L = r.at("L").get<int>();
-                    p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
                 } else if (kind == "pointer") {                 // generalized copy: (l, lc)-cell scorer
                     Idiom id; id.kind = "pointer"; id.id = r.value("id", -1); id.cite = cite;
                     id.lmax = r.value("lmax", 6);
@@ -171,7 +171,7 @@ struct Package {
                         auto k = it.key(); auto c = k.find(':');
                         id.cells[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                     }
-                    p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
                 } else if (kind == "dgate2") {                  // PAIR gate: two features jointly
                     Idiom id; id.kind = "dgate2"; id.id = r.value("id", -1); id.cite = cite;
                     id.feature = r.at("featureA").get<std::string>();
@@ -185,7 +185,7 @@ struct Package {
                             auto k = it.key(); auto c = k.find(':');
                             id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                         }
-                    p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
                 } else if (kind == "dgate") {                   // TWO-LAYER: gate over a derived predicate
                     Idiom id; id.kind = "dgate"; id.id = r.value("id", -1); id.cite = cite;
                     id.feature = r.at("feature").get<std::string>();
@@ -198,24 +198,17 @@ struct Package {
                             auto k = it.key(); auto c = k.find(':');
                             id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                         }
-                    p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
                 } else if (kind == "relation") {                // causal EQ-GUARD + COPY, routed OOD
                     Idiom id; id.kind = "relation"; id.id = r.value("id", -1); id.cite = cite;
                     id.conf = r.value("confidence", -1.0);
                     for (auto& ij : r.at("eq")) id.eq.emplace_back(ij.at(0).get<int>(), ij.at(1).get<int>());
                     id.copy_off = r.at("copy").get<int>();
-                    p.idioms.push_back(std::move(id));
+                    id.stratum = r.value("stratum", 1); p.idioms.push_back(std::move(id));
                 }                                               // unknown kinds are skipped (forward-compat with newer packages)
             } catch (const json::exception& e) {
                 throw std::runtime_error("rosetta package: rule #" + std::to_string(ri) + " (" + kind + ") in "
                                          + manifest_path + " is malformed — " + e.what());
-            }
-        }
-        {   // stratum backfill: idioms were appended in manifest order over non-ngram rules
-            size_t si = 0;
-            for (auto& r : m["rules"]) {
-                if (r.value("kind", std::string("ngram")) != "ngram" && si < p.idioms.size())
-                    p.idioms[si++].stratum = r.value("stratum", 1);
             }
         }
         p.n_rules = (int)(p.idioms.size());
@@ -498,7 +491,7 @@ struct Package {
                 if (bp >= 0) {
                     auto it = r.cells.find({bl, blc});
                     if (it != r.cells.end())
-                        consider(ctx[bp], it->second, Decision{0, "trusted", "causal", r.cite, r.id});
+                        consider(ctx[bp], it->second, Decision{0, "trusted", "causal", r.cite, r.id}, r.stratum);
                 }
             } else if (r.kind == "dgate") {
                 auto fi = feats.find(r.feature);
@@ -536,7 +529,7 @@ struct Package {
                 }
                 if (bestj >= 0)
                     consider(ctx[bestj + L], r.conf < 0 ? 0.0 : r.conf,
-                             Decision{0, "trusted", "causal", r.cite, r.id});
+                             Decision{0, "trusted", "causal", r.cite, r.id}, r.stratum);
             }
         }
         for (int k = std::min(n, W); k >= 1; k--) {
