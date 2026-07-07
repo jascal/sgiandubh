@@ -742,11 +742,20 @@ int main(int argc, char** argv) {
                     for (auto& mm : body["messages"])
                         if (mm.value("role", "") == "user") q = mm.value("content", "");
                 json a;
+                std::string canon_q, canon_ent;
+                bool canon_fail = false;
+                if (!pk.canon_templates.empty()) {           // CANONICALIZATION: parse the
+                    auto ce = pk.canonicalize(q);            // phrasing onto a covered template
+                    if (ce.first.empty()) canon_fail = true; // or ABSTAIN -- never raw-fragment
+                    else { canon_q = ce.first; canon_ent = ce.second; q = canon_q; }
+                }
                 {
                     std::lock_guard<std::mutex> lk(mu);
                     unsigned qids[512];
-                    int qn = tk_encode(tok, q.c_str(), qids, 512);
-                    if (qn <= 0) { a = json{{"answer", ""}, {"kind", "abstain"}}; }
+                    int qn = tk_encode(tok, (" " + q).c_str(), qids, 512);
+                    if (canon_fail) { a = json{{"answer", ""}, {"kind", "abstain"},
+                                               {"reason", "no template parse (canonicalization)"}}; }
+                    else if (qn <= 0) { a = json{{"answer", ""}, {"kind", "abstain"}}; }
                     else {
                         // CHAIN mode: greedy multi-token completion (stop at 12 steps, a low-
                         // confidence step, or sentence end) -- a spoke consumed by a hub LLM
@@ -774,6 +783,10 @@ int main(int argc, char** argv) {
                             a["citation"] = cite;
                             a["route"] = route;
                             if (minconf < 1e9) a["confidence"] = minconf;
+                            if (!canon_q.empty()) {          // TRANSPARENCY: the question
+                                a["canonical"] = canon_q;    // actually answered
+                                a["entity"] = canon_ent;
+                            }
                         } else a = json{{"answer", ""}, {"kind", "abstain"}};
                     }
                 }
@@ -783,8 +796,8 @@ int main(int argc, char** argv) {
                     {"message", json{{"role", "assistant"}, {"content", a.dump()}}}}});
                 rs.set_content(out.dump(), "application/json");
             });
-            fprintf(stderr, "sgiandubh rosetta-package SPOKE: %d rules (%zu trusted, W=%d) · next-token expert · listening :%d\n",
-                    pk.n_rules, pk.idioms.size(), pk.W, port);
+            fprintf(stderr, "sgiandubh rosetta-package SPOKE: %d rules (%zu trusted, W=%d, canon=%zu) · next-token expert · listening :%d\n",
+                    pk.n_rules, pk.idioms.size(), pk.W, pk.canon_templates.size(), port);
             rsrv.listen("0.0.0.0", port);
             tk_free(tok);
             return 0;
