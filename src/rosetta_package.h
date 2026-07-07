@@ -41,7 +41,9 @@ struct Idiom {                                                   // TRUSTED tier
 };
 struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members, avoid, entity_members, value_members;
         int within = 7;
-        std::vector<int> slot; int cap = 8, succ = 0, of_shift = 0; };
+        std::vector<int> slot;
+        std::set<int> entities, locations, objects, move_verbs, take_verbs, drop_verbs;
+        std::string mode = "is"; int cap = 8, succ = 0, of_shift = 0; };
 struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; int stratum = 1; };
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
@@ -50,6 +52,9 @@ struct Package {
     std::vector<std::map<Ctx, NGram>> ngrams;                    // index = suffix length; GATED
     int W = 0, n_rules = 0;
     std::string cover;                                           // "" = tiered; "support-weighted" = argmax-confidence
+    struct CanonTemplate { std::string prefix; std::set<std::string> keywords; };
+    std::vector<CanonTemplate> canon_templates;                  // mined template inventory
+    std::map<std::string, std::string> canon_entities;           // lowercase -> proper form
     double strata_tau = 0.35;                                    // stratum-1 confidence floor
     std::vector<Derived> derived;                                // two-layer: feature extractors
     std::map<int, int> cmap;                                     // concepts: member -> representative
@@ -83,6 +88,23 @@ struct Package {
         Package p;
         p.cover = m.value("cover", std::string(""));
         p.strata_tau = m.value("strata_tau", 0.35);
+        if (m.contains("canon")) {
+            for (auto& e : m["canon"]["entities"]) {
+                std::string en = e.get<std::string>(), lo = en;
+                for (auto& c : lo) c = tolower(c);
+                p.canon_entities[lo] = en;
+            }
+            for (auto& t : m["canon"]["templates"]) {
+                CanonTemplate ct; ct.prefix = t["prefix"].get<std::string>();
+                for (auto& k : t["keywords"]) {
+                    std::string kw = k.get<std::string>();
+                    while (!kw.empty() && kw.back() == 's') kw.pop_back();
+                    if (!kw.empty()) ct.keywords.insert(kw);
+                }
+                p.canon_templates.push_back(ct);
+            }
+        }
+
         if (m.contains("concepts"))
             for (auto it = m["concepts"].begin(); it != m["concepts"].end(); ++it)
                 for (auto& mm : it.value()) p.cmap[mm.get<int>()] = std::stoi(it.key());
@@ -99,6 +121,12 @@ struct Package {
                 if (d.contains("value_members")) for (auto& t : d["value_members"]) dv.value_members.insert(t.get<int>());
                 dv.within = d.value("within", 7);
                 if (d.contains("slot")) for (auto& t : d["slot"]) dv.slot.push_back(t.get<int>());
+                dv.mode = d.value("mode", std::string("is"));
+                for (auto& [key, tgt] : std::map<std::string, std::set<int>*>{
+                        {"entities", &dv.entities}, {"locations", &dv.locations},
+                        {"objects", &dv.objects}, {"move_verbs", &dv.move_verbs},
+                        {"take_verbs", &dv.take_verbs}, {"drop_verbs", &dv.drop_verbs}})
+                    if (d.contains(key)) for (auto& t : d[key]) tgt->insert(t.get<int>());
                 dv.of = d.value("of", std::string("")); dv.of_shift = d.value("of_shift", 0);
                 p.derived.push_back(std::move(dv));
             }
@@ -267,6 +295,57 @@ struct Package {
     // priority is kernel-checked (i-orca Arbitration.thy, argmax_policy_optimal), with calibration as
     // the stated premise. Ties keep the FIRST candidate: idioms in manifest order (the learner's
     // admitted order), then n-grams longest-first. Port of serve_package.py serve_sw.
+    // map a free-phrased query onto the mined template inventory; empty = no parse (ABSTAIN).
+    // returns {canonical_query, entity} -- the TRANSPARENCY fields the caller must surface.
+    std::pair<std::string, std::string> canonicalize(const std::string& query) const {
+        static const std::set<std::string> STOP = {"the", "of", "is", "a", "an", "in", "for",
+            "as", "with", "what", "which", "does", "do", "where", "how", "many", "s", "its",
+            "on", "table", "periodic"};
+        std::vector<std::string> words;
+        std::string cur;
+        for (char c : query + " ") {
+            if (isalpha((unsigned char)c)) cur += (char)tolower(c);
+            else if (c == '\'') { words.push_back(cur); cur.clear(); }   // possessives split
+            else if (!cur.empty()) { words.push_back(cur); cur.clear(); }
+        }
+        std::string ent, entlo;
+        for (auto& w : words) if (canon_entities.count(w)) { entlo = w; ent = canon_entities.at(w); break; }
+        if (ent.empty() || canon_templates.empty()) return {};
+        {   // ALREADY canonical -> pass through unchanged
+            std::string qn2 = query;
+            while (!qn2.empty() && (qn2.back() == ' ' || qn2.back() == '.')) qn2.pop_back();
+            for (auto& c : qn2) c = tolower(c);
+            for (auto& t : canon_templates) {
+                std::string pf = t.prefix;
+                auto pos0 = pf.find("{E}");
+                if (pos0 != std::string::npos) pf.replace(pos0, 3, ent);
+                for (auto& c : pf) c = tolower(c);
+                if (qn2 == pf) {
+                    std::string orig = query;
+                    while (!orig.empty() && (orig.back() == ' ' || orig.back() == '.')) orig.pop_back();
+                    return {orig, ent};
+                }
+            }
+        }
+        std::set<std::string> qkw;
+        for (auto w : words) {
+            while (!w.empty() && w.back() == 's') w.pop_back();
+            if (!w.empty() && !STOP.count(w) && w != entlo) qkw.insert(w);
+        }
+        const CanonTemplate* best = nullptr; double bestscore = 0;
+        for (auto& t : canon_templates) {
+            int hit = 0;
+            for (auto& w : qkw) if (t.keywords.count(w)) hit++;
+            double score = qkw.empty() ? 0 : (double)hit / (double)qkw.size();
+            if (hit && score > bestscore) { best = &t; bestscore = score; }
+        }
+        if (!best || bestscore < 0.4) return {};
+        std::string out = best->prefix;
+        auto pos = out.find("{E}");
+        if (pos != std::string::npos) out.replace(pos, 3, ent);
+        return {out, ent};
+    }
+
     std::optional<Decision> serve_sw(const Ctx& ctx) const {
         int n = (int)ctx.size();
         std::optional<Decision> best, best2;
@@ -312,6 +391,54 @@ struct Package {
                 int c = 0;
                 for (int t : ctx) c += (int)d.members.count(t);
                 feats[d.id] = c % 2;
+            } else if (d.kind == "estate2") {                // WORLD-STATE FOLD
+                if (!d.slot.empty() && (n < 2 || ctx[n - 2] != d.slot[0] || ctx[n - 1] != d.slot[1])) {
+                    feats[d.id] = -1; fpos[d.id] = -1; continue;
+                }
+                std::map<int, int> loc2, holder2, oloc2;
+                std::map<int, std::vector<int>> ohist2;
+                for (int i = 0; i + 1 < n; i++) {
+                    int w = ctx[i], v = ctx[i + 1];
+                    if (!d.entities.count(w)) continue;
+                    if (d.move_verbs.count(v)) {
+                        int dest = -1;
+                        for (int j = i + 2; j < std::min(i + 7, n); j++)
+                            if (d.locations.count(ctx[j])) { dest = ctx[j]; break; }
+                        if (dest < 0) continue;
+                        loc2[w] = dest;
+                        for (auto& [o, h] : holder2) if (h == w && (!oloc2.count(o) || oloc2[o] != dest)) {
+                            ohist2[o].push_back(oloc2.count(o) ? oloc2[o] : -1);
+                            oloc2[o] = dest;
+                        }
+                    } else if (d.take_verbs.count(v) || d.drop_verbs.count(v)) {
+                        int ob = -1;
+                        for (int j = i + 2; j < std::min(i + 6, n); j++)
+                            if (d.objects.count(ctx[j])) { ob = ctx[j]; break; }
+                        if (ob < 0) continue;
+                        if (d.take_verbs.count(v)) {
+                            holder2[ob] = w;
+                            if (loc2.count(w) && (!oloc2.count(ob) || oloc2[ob] != loc2[w])) {
+                                ohist2[ob].push_back(oloc2.count(ob) ? oloc2[ob] : -1);
+                                oloc2[ob] = loc2[w];
+                            }
+                        } else holder2.erase(ob);
+                    }
+                }
+                int qo = -1, qi = -1;
+                for (int i = n - 1; i >= 0; i--) if (d.objects.count(ctx[i])) { qo = ctx[i]; qi = i; break; }
+                int feat = -1;
+                if (qo >= 0) {
+                    if (d.mode == "is") feat = oloc2.count(qo) ? oloc2[qo] : -1;
+                    else {
+                        int ref = -1;
+                        for (int i = n - 1; i > qi; i--) if (d.locations.count(ctx[i])) { ref = ctx[i]; break; }
+                        std::vector<int> hist = ohist2.count(qo) ? ohist2[qo] : std::vector<int>{};
+                        hist.push_back(oloc2.count(qo) ? oloc2[qo] : -1);
+                        for (int k = (int)hist.size() - 1; k > 0; k--)
+                            if (hist[k] == ref && ref >= 0) { feat = hist[k - 1]; break; }
+                    }
+                }
+                feats[d.id] = feat; fpos[d.id] = n - 1;
             } else if (d.kind == "estate") {                 // ENTITY-STATE REGISTER: last-
                 if (!d.slot.empty() && (n < 2 || ctx[n - 2] != d.slot[0] || ctx[n - 1] != d.slot[1])) {
                     feats[d.id] = -1; fpos[d.id] = -1; continue;
