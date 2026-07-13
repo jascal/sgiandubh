@@ -18,11 +18,13 @@ using rosetta::Package;
 //  compose : frame {3-back == 200}, operands (2-back, 1-back) valmap 5->1 6->2, sum 3->70
 //  ngram   : [11,12]->99  and  [12]->88   (longest-suffix wins)
 static const char* MANIFEST = R"JSON({
+  "schema_version": 3,
+  "alpha": 2.0,
   "n_rules": 4,
   "rules": [
-    {"kind":"gate","id":1,"frame":{"2":100},"slot":1,"table":{"7":42,"8":43},"citation":["corpus@5"]},
+    {"kind":"gate","id":1,"frame":{"2":100},"slot":1,"table":{"7":42,"8":43},"counts":{"7":[5,6]},"citation":["corpus@5"]},
     {"kind":"compose","id":2,"frame":{"3":200},"operands":[2,1],"valmap":{"5":1,"6":2},"sum":{"3":70},"citation":["corpus@9"]},
-    {"kind":"ngram","ctx":[11,12],"out":99,"basis":"observational","cite":[22]},
+    {"kind":"ngram","ctx":[11,12],"out":99,"basis":"observational","counts":[7,9],"cite":[22]},
     {"kind":"ngram","ctx":[12],"out":88,"basis":"observational","cite":[23]}
   ]
 })JSON";
@@ -43,6 +45,14 @@ int main() {
     assert(p.n_rules == 4);
     assert(p.idioms.size() == 2);
     assert(p.W == 2);
+    assert(p.schema_version == 3);
+    assert(std::abs(p.alpha - 2.0) < 1e-9);
+    assert(p.idioms[0].counts.at(7) == std::make_pair(5L, 6L));
+    assert(p.idioms[0].counts.count(8) == 0);                  // absent is not the pair (0, 0)
+    assert(p.ngrams[2].at(Ctx{11, 12}).cnt == 7);
+    assert(p.ngrams[2].at(Ctx{11, 12}).tot == 9);
+    assert(p.ngrams[1].at(Ctx{12}).cnt == -1);                // old package/rule default
+    assert(p.ngrams[1].at(Ctx{12}).tot == -1);
 
     // gate: ...,100,7 -> 42 ; ...,100,8 -> 43  (trusted/causal beats any n-gram)
     assert(served(p, {1, 100, 7}, "trusted", "causal") == 42);

@@ -34,18 +34,20 @@ struct Idiom {                                                   // TRUSTED tier
     int stratum = 1;                                             // labeled trust pool (fall-through)
     std::string origin;                                          // document | teacher | feedback
     std::map<int, double> confs;                                 // gate: per-key confidence (sw cover)
+    std::map<int, std::pair<long, long>> counts;                 // gate: raw (cnt, tot), optional
     std::string feature, featureB;                               // dgate: derived-feature id(s)
     int lmax = 6;                                                // pointer: max match depth
     std::map<std::pair<int, int>, double> cells;                 // pointer: (l, lc) -> confidence
     std::map<std::pair<int, int>, int> dtable;                   // dgate: (feature, last) -> out
     std::map<std::pair<int, int>, double> dconfs;                // dgate: per-key confidence
+    std::map<std::pair<int, int>, std::pair<long, long>> dcounts;// dgate: raw (cnt, tot), optional
 };
 struct Derived { std::string id, kind, of; std::set<int> openers, closers, members, quote_members, avoid, entity_members, value_members;
         int within = 7;
         std::vector<int> slot;
         std::set<int> entities, locations, objects, move_verbs, take_verbs, drop_verbs;
         std::string mode = "is"; int cap = 8, succ = 0, of_shift = 0; };
-struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; int stratum = 1; std::string origin; };
+struct NGram { int out; std::string basis, cite; double det = -1.0, conf = -1.0; int stratum = 1; std::string origin; long cnt = -1, tot = -1; };
 struct Decision { int answer; std::string tier, basis, citation; int rule = -1; double conf = -1.0; };
 
 struct Package {
@@ -53,6 +55,8 @@ struct Package {
     std::vector<std::map<Ctx, NGram>> ngrams;                    // index = suffix length; GATED
     int W = 0, n_rules = 0;
     std::string cover;                                           // "" = tiered; "support-weighted" = argmax-confidence
+    int schema_version = -1;                                     // optional machine schema version
+    double alpha = -1.0;                                         // optional confidence shrinkage
     struct CanonTemplate { std::string prefix; std::set<std::string> keywords; };
     std::vector<CanonTemplate> canon_templates;                  // mined template inventory
     std::map<std::string, std::string> canon_entities;           // lowercase -> proper form
@@ -89,6 +93,8 @@ struct Package {
             throw std::runtime_error("rosetta package: " + manifest_path + " is missing a \"rules\" array");
         Package p;
         p.cover = m.value("cover", std::string(""));
+        p.schema_version = m.value("schema_version", -1);
+        p.alpha = m.value("alpha", -1.0);
         p.strata_tau = m.value("strata_tau", 0.35);
         p.origin = m.value("origin", std::string("teacher"));
         p.origin_model = m.value("origin_model", std::string(""));
@@ -151,14 +157,21 @@ struct Package {
                     Ctx ctx = r.at("ctx").get<Ctx>();
                     p.ngrams[ctx.size()][ctx] = {r.at("out").get<int>(), r.value("basis", std::string("observational")),
                                                  cite, r.value("determinism", -1.0), r.value("confidence", -1.0),
-                                                 r.value("stratum", 1)};
-                    p.ngrams[ctx.size()][ctx].origin = r.value("origin", p.origin);
+                                                 r.value("stratum", 1), r.value("origin", p.origin), -1, -1};
+                    if (r.contains("counts") && r["counts"].is_array()
+                        && r["counts"].size() == 2) {
+                        p.ngrams[ctx.size()][ctx].cnt = r["counts"][0].get<long>();
+                        p.ngrams[ctx.size()][ctx].tot = r["counts"][1].get<long>();
+                    }
                 } else if (kind == "gate") {
                     Idiom id; id.kind = "gate"; id.id = r.value("id", -1); id.cite = cite;
                     id.frame = imap(r.at("frame")); id.slot = r.at("slot").get<int>(); id.table = imap(r.at("table"));
                     if (r.contains("confs"))
                         for (auto it = r["confs"].begin(); it != r["confs"].end(); ++it)
                             id.confs[std::stoi(it.key())] = it.value().get<double>();
+                    if (r.contains("counts"))
+                        for (auto it = r["counts"].begin(); it != r["counts"].end(); ++it)
+                            id.counts[std::stoi(it.key())] = {it.value()[0].get<long>(), it.value()[1].get<long>()};
                     id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "compose") {
                     Idiom id; id.kind = "compose"; id.id = r.value("id", -1); id.cite = cite;
@@ -191,6 +204,12 @@ struct Package {
                             auto k = it.key(); auto c = k.find(':');
                             id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
                         }
+                    if (r.contains("counts"))
+                        for (auto it = r["counts"].begin(); it != r["counts"].end(); ++it) {
+                            auto k = it.key(); auto c = k.find(':');
+                            id.dcounts[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] =
+                                {it.value()[0].get<long>(), it.value()[1].get<long>()};
+                        }
                     id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "dgate") {                   // TWO-LAYER: gate over a derived predicate
                     Idiom id; id.kind = "dgate"; id.id = r.value("id", -1); id.cite = cite;
@@ -203,6 +222,12 @@ struct Package {
                         for (auto it = r["confs"].begin(); it != r["confs"].end(); ++it) {
                             auto k = it.key(); auto c = k.find(':');
                             id.dconfs[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] = it.value().get<double>();
+                        }
+                    if (r.contains("counts"))
+                        for (auto it = r["counts"].begin(); it != r["counts"].end(); ++it) {
+                            auto k = it.key(); auto c = k.find(':');
+                            id.dcounts[{std::stoi(k.substr(0, c)), std::stoi(k.substr(c + 1))}] =
+                                {it.value()[0].get<long>(), it.value()[1].get<long>()};
                         }
                     id.stratum = r.value("stratum", 1); id.origin = r.value("origin", p.origin); p.idioms.push_back(std::move(id));
                 } else if (kind == "relation") {                // causal EQ-GUARD + COPY, routed OOD
