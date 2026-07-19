@@ -110,6 +110,23 @@ struct Package {
         if (n_words < ab["min_words"].get<size_t>() || n_words > ab["max_words"].get<size_t>()) {
             r.abstain = true; r.reason = "length"; return r;
         }
+        // language gate (the bound IS the router): abstain when the input reads more like the
+        // out-of-scope stoplist than the in-scope one. Lists live in the package (meta.json), not here.
+        if (meta.contains("lang_gate")) {
+            auto hits = [&](const json& lst) {
+                size_t h = 0;
+                for (auto& w : r.words) {
+                    std::string lw = w;
+                    for (auto& c : lw) c = (char)std::tolower((unsigned char)c);
+                    for (auto& sw : lst)
+                        if (lw == sw.get<std::string>()) { h++; break; }
+                }
+                return h;
+            };
+            if (hits(meta["lang_gate"]["en"]) > hits(meta["lang_gate"]["de"])) {
+                r.abstain = true; r.reason = "language"; return r;
+            }
+        }
         // per-word WordPiece (supar SubwordField: no specials, empty -> [UNK], cap fix_len pieces)
         int fix_len = meta["pipeline"]["fix_len"].get<int>();
         uint32_t cls = meta["pipeline"]["cls_id"].get<uint32_t>();

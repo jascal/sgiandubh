@@ -749,10 +749,15 @@ int main(int argc, char** argv) {
                     a = json{{"answer", ""}, {"kind", "abstain"}, {"reason", p.reason}};
                 } else {
                     json toks = json::array();
-                    for (size_t i = 0; i < p.words.size(); i++)
+                    std::string flat;
+                    for (size_t i = 0; i < p.words.size(); i++) {
                         toks.push_back(json{{"word", p.words[i]}, {"head", p.head[i]}, {"deprel", p.deprel[i]},
                                             {"pos", p.pos[i]}, {"case", p.case_[i]}, {"gnn", p.gnn[i]}});
-                    a = json{{"kind", "parse"}, {"tokens", toks},
+                        flat += p.words[i] + "\u2192" + (p.head[i] ? p.words[p.head[i] - 1] : "ROOT")
+                              + ":" + p.deprel[i] + "/" + p.pos[i]
+                              + (p.case_[i] != "-" ? "/" + p.case_[i] : "") + "  ";
+                    }
+                    a = json{{"answer", flat}, {"kind", "parse"}, {"tokens", toks},
                              {"citation", np.meta["citation"]}, {"model", np.meta["model"]}};
                 }
             }
@@ -760,6 +765,10 @@ int main(int argc, char** argv) {
                          {"choices", json::array({json{{"index", 0}, {"finish_reason", "stop"},
                                                        {"message", json{{"role", "assistant"}, {"content", a.dump()}}}}})}};
             rs.set_content(resp.dump(), "application/json");
+        });
+        nsrv.Get("/v1/models", [&](const httplib::Request&, httplib::Response& rs) {
+            rs.set_content(json{{"object", "list"}, {"data", json::array({json{{"id", "sgiandubh-neural-expert"},
+                                {"object", "model"}}})}}.dump(), "application/json");
         });
         nsrv.Get("/health", [&](const httplib::Request&, httplib::Response& rs) {
             rs.set_content(json{{"ok", true}, {"engine", "neural-expert-c++"},
