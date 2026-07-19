@@ -17,6 +17,7 @@
 #include "repl_tui.h"               // fixed input line + status footer for the REPL (identical copy in claymore)
 #include "rosetta_package.h"        // consume a rosetta expert package + the C++ semiring decode (the convergence runtime)
 #include "../tok_ffi/tok_ffi.h"     // HF tokenizers via FFI — BPE tokenize for the rosetta-package path
+#include "neural_expert.h"           // neural-expert package: fieldrun BERT encoder + biaffine/tag heads
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -81,7 +82,8 @@ static bool g_answer_from_corpus = false; // --answer-from-corpus: return the be
 static bool g_no_gram = false;            // --no-gram: disable the generative tail (faithful → retrieval → abstain only) — the strongest-trust config
 static bool g_repl = false;               // --repl: interactive stdin loop for local testing (no server)
 static bool g_repl_plain = false;         // --plain: disable the fixed-input/footer REPL TUI (plain getline)
-static bool g_rosetta_pkg = false;        // --rosetta-package: serve a rosetta expert package (manifest.json + tokenizer), host-side
+static bool g_rosetta_pkg = false;
+static bool g_neural_pkg = false;         // --neural-package: serve a neural-expert package (German UD parse + tags)        // --rosetta-package: serve a rosetta expert package (manifest.json + tokenizer), host-side
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -711,6 +713,7 @@ int main(int argc, char** argv) {
         else if (a == "--repl") g_repl = true;
         else if (a == "--plain") g_repl_plain = true;
         else if (a == "--rosetta-package") g_rosetta_pkg = true;
+        else if (a == "--neural-package") g_neural_pkg = true;
         // Tunable matching thresholds (defaults above are conservative; tune on a representative test set):
         else if (a == "--tau") fval(g_tau);                       // faithful lexical-Jaccard match
         else if (a == "--ground-cos") fval(g_cos_tau);            // min cosine to attach a supporting passage
@@ -723,6 +726,63 @@ int main(int argc, char** argv) {
     }
     g_pkg = pos.size() > 0 ? pos[0] : "package";
     int port = pos.size() > 1 ? std::stoi(pos[1]) : 8080;
+
+    if (g_neural_pkg) {  // --- neural-expert: German UD parse + tags from the fieldrun BERT encoder + flat heads ---
+        static nexp::Package np;
+        if (!np.load(g_pkg)) { fprintf(stderr, "sgiandubh: --neural-package needs %s/{gbert.fieldrun.json,bundle.tokenizer.json,heads.json,heads.bin,meta.json}\n", g_pkg.c_str()); return 1; }
+        httplib::Server nsrv;
+        static std::mutex nmu;
+        nsrv.Post("/v1/chat/completions", [&](const httplib::Request& rq, httplib::Response& rs) {
+            std::string q;
+            json body = json::parse(rq.body, nullptr, false);
+            if (!body.is_discarded() && body.contains("messages"))
+                for (auto& mm : body["messages"])
+                    if (mm.value("role", "") == "user") q = mm.value("content", "");
+            json a;
+            {
+                std::lock_guard<std::mutex> lk(nmu);
+                std::vector<std::string> pretok;   // optional exact tokenization from the caller
+                if (!body.is_discarded() && body.contains("words"))
+                    for (auto& w : body["words"]) pretok.push_back(w.get<std::string>());
+                auto p = np.parse(q, pretok);
+                if (p.abstain) {
+                    a = json{{"answer", ""}, {"kind", "abstain"}, {"reason", p.reason}};
+                } else {
+                    json toks = json::array();
+                    std::string flat;
+                    for (size_t i = 0; i < p.words.size(); i++) {
+                        toks.push_back(json{{"word", p.words[i]}, {"head", p.head[i]}, {"deprel", p.deprel[i]},
+                                            {"pos", p.pos[i]}, {"case", p.case_[i]}, {"gnn", p.gnn[i]}});
+                        flat += p.words[i] + "\u2192" + (p.head[i] ? p.words[p.head[i] - 1] : "ROOT")
+                              + ":" + p.deprel[i] + "/" + p.pos[i]
+                              + (p.case_[i] != "-" ? "/" + p.case_[i] : "") + "  ";
+                    }
+                    a = json{{"answer", flat}, {"kind", "parse"}, {"tokens", toks},
+                             {"citation", np.meta["citation"]}, {"model", np.meta["model"]}};
+                }
+            }
+            json resp = {{"id", "nexp"}, {"object", "chat.completion"}, {"model", "sgiandubh-neural-expert"},
+                         {"choices", json::array({json{{"index", 0}, {"finish_reason", "stop"},
+                                                       {"message", json{{"role", "assistant"}, {"content", a.dump()}}}}})}};
+            rs.set_content(resp.dump(), "application/json");
+        });
+        nsrv.Get("/v1/models", [&](const httplib::Request&, httplib::Response& rs) {
+            rs.set_content(json{{"object", "list"}, {"data", json::array({json{{"id", "sgiandubh-neural-expert"},
+                                {"object", "model"}}})}}.dump(), "application/json");
+        });
+        nsrv.Get("/health", [&](const httplib::Request&, httplib::Response& rs) {
+            rs.set_content(json{{"ok", true}, {"engine", "neural-expert-c++"},
+                                {"task", np.meta["task"]}, {"dim", np.d}}.dump(), "application/json");
+        });
+        nsrv.Get("/catalog", [&](const httplib::Request&, httplib::Response& rs) {
+            rs.set_content(json{{"kind", "neural-expert"}, {"task", np.meta["task"]},
+                                {"model", np.meta["model"]}, {"provenance", np.meta["provenance"]},
+                                {"abstains_on", np.meta["abstain"]}}.dump(), "application/json");
+        });
+        fprintf(stderr, "sgiandubh neural-expert: %s on :%d\n", g_pkg.c_str(), port);
+        nsrv.listen("0.0.0.0", port);
+        return 0;
+    }
 
     if (g_rosetta_pkg) {  // --- the rosetta→sgiandubh convergence runtime: serve a rosetta expert package, host-side ---
         // No souffle engine, no per-item index.json: load manifest.json (the tiered cover) + the model's BPE tokenizer,

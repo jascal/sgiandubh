@@ -8,3 +8,4 @@
 /package_*/
 __pycache__/
 compile_commands.json
+bert_ffi/target/
