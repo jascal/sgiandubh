@@ -18,6 +18,7 @@
 #include "rosetta_package.h"        // consume a rosetta expert package + the C++ semiring decode (the convergence runtime)
 #include "../tok_ffi/tok_ffi.h"     // HF tokenizers via FFI — BPE tokenize for the rosetta-package path
 #include "neural_expert.h"           // neural-expert package: fieldrun BERT encoder + biaffine/tag heads
+#include "component_transform.h"     // certified UD->component transform + error rules (dl-gated port)
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -730,6 +731,9 @@ int main(int argc, char** argv) {
     if (g_neural_pkg) {  // --- neural-expert: German UD parse + tags from the fieldrun BERT encoder + flat heads ---
         static nexp::Package np;
         if (!np.load(g_pkg)) { fprintf(stderr, "sgiandubh: --neural-package needs %s/{gbert.fieldrun.json,bundle.tokenizer.json,heads.json,heads.bin,meta.json}\n", g_pkg.c_str()); return 1; }
+        static ctrans::Grammar ngram_de;
+        if (!ngram_de.load(g_pkg + "/grammar.json"))
+            fprintf(stderr, "sgiandubh: no %s/grammar.json — componentTree/errors disabled\n", g_pkg.c_str());
         httplib::Server nsrv;
         static std::mutex nmu;
         nsrv.Post("/v1/chat/completions", [&](const httplib::Request& rq, httplib::Response& rs) {
@@ -759,6 +763,26 @@ int main(int argc, char** argv) {
                     }
                     a = json{{"answer", flat}, {"kind", "parse"}, {"tokens", toks},
                              {"citation", np.meta["citation"]}, {"model", np.meta["model"]}};
+                    if (ngram_de.loaded) {   // certified layer: component tree + register-backed error flags
+                        std::vector<ctrans::Tok> ct;
+                        for (size_t i = 0; i < p.words.size(); i++) {
+                            ctrans::Tok tk;
+                            tk.word = p.words[i];
+                            tk.lower = p.words[i];
+                            for (auto& c : tk.lower) c = (char)std::tolower((unsigned char)c);
+                            tk.pos = p.pos[i];
+                            tk.deprel = p.deprel[i];
+                            tk.base = tk.deprel.substr(0, tk.deprel.find(':'));
+                            tk.head = p.head[i];
+                            tk.cas = p.case_[i];
+                            tk.gnn = p.gnn[i];
+                            ct.push_back(tk);
+                        }
+                        json tree, errs;
+                        ctrans::analyze(ct, ngram_de, tree, errs);
+                        a["componentTree"] = tree;
+                        a["errors"] = errs;
+                    }
                 }
             }
             json resp = {{"id", "nexp"}, {"object", "chat.completion"}, {"model", "sgiandubh-neural-expert"},
