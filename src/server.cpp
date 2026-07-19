@@ -741,7 +741,10 @@ int main(int argc, char** argv) {
             json a;
             {
                 std::lock_guard<std::mutex> lk(nmu);
-                auto p = np.parse(q);
+                std::vector<std::string> pretok;   // optional exact tokenization from the caller
+                if (!body.is_discarded() && body.contains("words"))
+                    for (auto& w : body["words"]) pretok.push_back(w.get<std::string>());
+                auto p = np.parse(q, pretok);
                 if (p.abstain) {
                     a = json{{"answer", ""}, {"kind", "abstain"}, {"reason", p.reason}};
                 } else {

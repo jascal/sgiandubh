@@ -102,10 +102,10 @@ struct Package {
         std::vector<int> head;  // 1-based word index, 0 = root
     };
 
-    Parse parse(const std::string& text) const {
+    Parse parse(const std::string& text, const std::vector<std::string>& pretok = {}) const {
         Parse r;
         auto& ab = meta["abstain"];
-        r.words = split_words(text);
+        r.words = pretok.empty() ? split_words(text) : pretok;
         size_t n_words = r.words.size();
         if (n_words < ab["min_words"].get<size_t>() || n_words > ab["max_words"].get<size_t>()) {
             r.abstain = true; r.reason = "length"; return r;
