@@ -20,11 +20,12 @@ CXXFLAGS="-std=c++17 $MODE -Wno-deprecated-declarations -isystem third_party"
 
 TOKLIB=tok_ffi/target/release/libtok_ffi.a
 echo "[1/3] cargo -> tokenizer FFI staticlib (HF tokenizers; powers the --rosetta-package runtime's BPE tokenize)"
-( cd tok_ffi && cargo build --release )
+( cd tok_ffi && cargo build --release && cd ../bert_ffi && cargo build --release )
 echo "[2/3] g++ -> server object (-Wall -Wextra; pure-C++ semiring decode)"
 g++ $CXXFLAGS -Wall -Wextra -c src/server.cpp -o build/server.o
 echo "[3/3] g++ -> link (+ the tokenizer FFI staticlib)"
-g++ $CXXFLAGS build/server.o "$TOKLIB" -o build/sgiandubh -lpthread -ldl -lm
+BERTLIB=bert_ffi/target/release/libbert_ffi.a
+g++ $CXXFLAGS build/server.o "$TOKLIB" "$BERTLIB" -o build/sgiandubh -lpthread -ldl -lm
 
 # compile_commands.json for clang-tidy / LSP (server.cpp is the unit tooling cares about). Absolute paths → gitignored.
 printf '[{"directory": "%s", "file": "src/server.cpp", "command": "g++ %s -Wall -Wextra -c src/server.cpp"}]\n' \

@@ -1,0 +1,15 @@
+[package]
+name = "bert_ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+# fieldrun as a git dependency (workspace rule: cross-repo deps via published git refs, never local
+# paths). Pin to the bert-encoder branch until fieldrun PR #134 merges, then move to a tag.
+[dependencies]
+fieldrun = { git = "ssh://git@github.com/jascal/fieldrun.git", branch = "feat/bert-encoder" }
+
+[profile.release]
+opt-level = 3
