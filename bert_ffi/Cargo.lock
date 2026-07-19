@@ -229,7 +229,7 @@ checksum = "d817e038c30374a4bcb22f94d0a8a0e216958d4c3dcde369b1439fec4bdda6e6"
 [[package]]
 name = "fieldrun"
 version = "0.1.0"
-source = "git+ssh://git@github.com/jascal/fieldrun.git?branch=feat%2Fbert-encoder#ba4e1e68ae67dda05169d53e8221d9091b64b01a"
+source = "git+ssh://git@github.com/jascal/fieldrun.git?tag=bert-encoder-v1#d17438c2e5485223619790a0879de4fdb81571a5"
 dependencies = [
  "half",
  "libm",
