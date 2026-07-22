@@ -8,4 +8,7 @@ echo "[test] tok_ffi (Rust FFI null-safety contract)"
 echo "[test] rosetta_package.h"
 "$CXX" -std=c++17 -O2 -Wall -Wextra -isystem third_party -isystem src test/test_rosetta_package.cpp -o build/test_rosetta_package
 ./build/test_rosetta_package
+echo "[test] neural_expert.h split_words"
+"$CXX" -std=c++17 -O2 -Wall -Wextra -isystem third_party -isystem src test/test_split_words.cpp -o build/test_split_words
+./build/test_split_words
 echo "[test] all passed"

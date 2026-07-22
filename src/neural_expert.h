@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "json.hpp"
@@ -70,20 +71,38 @@ struct Package {
 
     // ---- word splitting: whitespace + punctuation peeling (matches the python spoke) --------------
     static std::vector<std::string> split_words(const std::string& text) {
-        auto is_punct = [](unsigned char c) {
+        auto is_ascii_punct = [](unsigned char c) {
             return std::ispunct(c) && c != '-';  // keep hyphens inside words (UD German convention)
+        };
+        // German/Unicode quotation marks are multi-byte UTF-8, so std::ispunct (byte-wise,
+        // ASCII-only) never sees them and the (c & 0x80) guard below skips them. Peel them
+        // explicitly, kept in sync with the reference spoke's _PUNCT (german_parser_spoke.py).
+        // Without this, „e“ survived as one fused token, was tagged PUNCT, and — for a single
+        // quoted letter — became the parse root, wrecking the tree. See satzklar-model#1.
+        static constexpr std::string_view MULTIBYTE_PUNCT[] = {
+            "\xC2\xAB", "\xC2\xBB",                          // «  »    (U+00AB / U+00BB guillemets)
+            "\xE2\x80\x9E", "\xE2\x80\x9C", "\xE2\x80\x9D",  // „  “  ”  (U+201E / U+201C / U+201D)
+            "\xE2\x80\x9A", "\xE2\x80\x98", "\xE2\x80\x99",  // ‚  ‘  ’  (U+201A / U+2018 / U+2019)
+        };
+        auto multibyte_len_at = [&](size_t i) -> size_t {
+            for (std::string_view g : MULTIBYTE_PUNCT)
+                if (text.compare(i, g.size(), g.data(), g.size()) == 0) return g.size();
+            return 0;
         };
         std::vector<std::string> words;
         std::string cur;
+        auto flush = [&] { if (!cur.empty()) { words.push_back(cur); cur.clear(); } };
         for (size_t i = 0; i < text.size();) {
             unsigned char c = text[i];
-            if (std::isspace(c)) {
-                if (!cur.empty()) { words.push_back(cur); cur.clear(); }
-                i++;
+            if (std::isspace(c)) { flush(); i++; continue; }
+            if (size_t len = multibyte_len_at(i)) {         // multi-byte quote → own token
+                flush();
+                words.emplace_back(text, i, len);
+                i += len;
                 continue;
             }
-            if (is_punct(c) && (c & 0x80) == 0) {
-                if (!cur.empty()) { words.push_back(cur); cur.clear(); }
+            if ((c & 0x80) == 0 && is_ascii_punct(c)) {     // ASCII punctuation → own token
+                flush();
                 words.push_back(std::string(1, (char)c));
                 i++;
                 continue;
@@ -91,7 +110,7 @@ struct Package {
             cur += (char)c;
             i++;
         }
-        if (!cur.empty()) words.push_back(cur);
+        flush();
         return words;
     }
 
