@@ -63,6 +63,7 @@ struct Analysis {                        // shared machinery for transform + err
     std::vector<int> clause_of;           // [i] -> clause head (1-based; index 0 unused)
     std::vector<int> roots;
     std::map<int, std::vector<int>> clauses;
+    std::vector<int> sentence_punct;      // Satz-level tokens, in no clause (see segment())
     std::map<int, std::vector<int>> pred_chain, pred_members;   // per clause head
     // per clause: groups in python claim order: (anchor_or_min, label, members)
     struct Group { int first; std::string label; std::vector<int> members; };
@@ -177,7 +178,23 @@ struct Analysis {                        // shared machinery for transform + err
         };
         walk(roots[0], roots[0]);
         for (size_t r = 1; r < roots.size(); r++) walk(roots[r], roots[r]);
-        for (int i = 1; i <= n; i++) clauses[clause_of[i]].push_back(i);
+        // The sentence-final terminator punctuates the WHOLE sentence, so it belongs to Satz, not
+        // to a clause: UD attaches it to the root and the root heads the FIRST clause, so without
+        // this it lands inside clause 1 even when the sentence runs on (germandata#1). Guarded on
+        // multi-clause to keep single-clause trees byte-identical — there the clause node IS Satz.
+        // Narrow by design: clause-internal commas and quotes stay in the clause they punctuate.
+        static const std::set<std::string> SENT_FINAL = {".", "?", "!", "…", "?!", "!?"};
+        std::set<int> distinct;
+        for (int i = 1; i <= n; i++) distinct.insert(clause_of[i]);
+        // clause_of[n] != n guards the degenerate parse where the final PUNCT is itself the root,
+        // hence a clause head: lifting it would leave its own clause headless.
+        if (distinct.size() > 1 && toks[n - 1].pos == "PUNCT" &&
+            SENT_FINAL.count(toks[n - 1].word) && clause_of[n] != n) {
+            sentence_punct.push_back(n);
+            clause_of[n] = 0;
+        }
+        for (int i = 1; i <= n; i++)
+            if (clause_of[i] != 0) clauses[clause_of[i]].push_back(i);
     }
 
     void predicates() {
@@ -401,6 +418,9 @@ struct Analysis {                        // shared machinery for transform + err
             n["component"] = clause_label.at(ch);
             root["children"].push_back(n);
         }
+        // Satz-level leaves. python sorts all Satz children by position; sentence_punct is by
+        // definition the sentence's last token, so appending is that same order.
+        for (int j : sentence_punct) root["children"].push_back(leaf_node(j));
         return root;
     }
 
