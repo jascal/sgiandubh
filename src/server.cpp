@@ -35,6 +35,16 @@
 #include <vector>
 using json = nlohmann::json;
 
+// Build identity, injected by build.sh as the sgiandubh git description (short sha, "-dirty" when
+// the tree had uncommitted changes, "unknown" outside a checkout). Surfaced on /health so a deploy
+// can be verified by STRING COMPARISON — "is the binary I just built the one now serving?" —
+// instead of a hand-written behavioral assertion per deploy. Without it, /health answers ok:true
+// from any binary, and on 2026-07-27 a stale container passed a full behavioral verification
+// because every assertion in it happened to hold for the previous binary too.
+#ifndef SGIANDUBH_BUILD
+#define SGIANDUBH_BUILD "unknown"
+#endif
+
 struct Item {
     std::string id, question, citation, facts, answer, route;  // route: RETRIEVED|SELECTED|COMPOSED (provenance tier)
     double margin = 1e9;                                        // thinnest-decision margin in the answer (1e9 = absent)
@@ -705,6 +715,10 @@ int main(int argc, char** argv) {
     std::vector<std::string> pos;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
+        // --version before anything else: it must work with no package and no port, so a deploy can
+        // ask a staged binary what it is rather than re-deriving it from the checkout's git state
+        // (which says nothing about a binary built earlier, or elsewhere).
+        if (a == "--version") { printf("%s\n", SGIANDUBH_BUILD); return 0; }
         auto fval = [&](double& dst) { if (i + 1 < argc) dst = std::atof(argv[++i]); };
         auto sval = [&](std::string& dst) { if (i + 1 < argc) dst = argv[++i]; };
         if (a == "--key") sval(g_default_key);                    // restrict THIS instance to a content subset (the slice)
@@ -796,6 +810,7 @@ int main(int argc, char** argv) {
         });
         nsrv.Get("/health", [&](const httplib::Request&, httplib::Response& rs) {
             rs.set_content(json{{"ok", true}, {"engine", "neural-expert-c++"},
+                                {"build", SGIANDUBH_BUILD},
                                 {"task", np.meta["task"]}, {"dim", np.d}}.dump(), "application/json");
         });
         nsrv.Get("/catalog", [&](const httplib::Request&, httplib::Response& rs) {
@@ -1002,6 +1017,7 @@ int main(int argc, char** argv) {
         m["status"] = "ok";
         m["model"] = g_model;
         m["engine"] = "semiring-c++";
+        m["build"] = SGIANDUBH_BUILD;
         m["items"] = (int)g_items.size();
         m["gram"] = g_gram.loaded;
         m["grounding"] = g_knowledge.empty() ? "off" : (g_dim > 0 ? "vector" : "lexical");
