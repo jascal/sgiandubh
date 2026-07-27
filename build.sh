@@ -15,8 +15,14 @@ for a in "$@"; do case "$a" in --debug) DEBUG=1 ;; esac; done
 if [ "$DEBUG" = 1 ]; then MODE="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined"; echo "[*] debug build: ASan + UBSan + warnings";
 else MODE="-O2"; fi
 
+# Build identity -> /health, so a deploy is verifiable by string comparison ("is the binary I just
+# built the one now serving?") instead of a behavioral assertion written afresh per deploy. Marked
+# -dirty when the tree has uncommitted changes, since such a binary matches no commit.
+BUILD_ID=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+[ "$BUILD_ID" != unknown ] && ! git diff --quiet 2>/dev/null && BUILD_ID="$BUILD_ID-dirty"
+
 # -isystem (not -I) for vendored headers so their warnings don't drown ours; -Wall/-Wextra only on OUR code.
-CXXFLAGS="-std=c++17 $MODE -Wno-deprecated-declarations -isystem third_party"
+CXXFLAGS="-std=c++17 $MODE -Wno-deprecated-declarations -isystem third_party -DSGIANDUBH_BUILD=\"$BUILD_ID\""
 
 TOKLIB=tok_ffi/target/release/libtok_ffi.a
 echo "[1/3] cargo -> tokenizer FFI staticlib (HF tokenizers; powers the --rosetta-package runtime's BPE tokenize)"
@@ -28,8 +34,10 @@ BERTLIB=bert_ffi/target/release/libbert_ffi.a
 g++ $CXXFLAGS build/server.o "$TOKLIB" "$BERTLIB" -o build/sgiandubh -lpthread -ldl -lm
 
 # compile_commands.json for clang-tidy / LSP (server.cpp is the unit tooling cares about). Absolute paths → gitignored.
+# CXXFLAGS carries -DSGIANDUBH_BUILD="..." whose quotes must be escaped, or this emits invalid JSON.
+CXXFLAGS_JSON=${CXXFLAGS//\"/\\\"}
 printf '[{"directory": "%s", "file": "src/server.cpp", "command": "g++ %s -Wall -Wextra -c src/server.cpp"}]\n' \
-    "$PWD" "$CXXFLAGS" > compile_commands.json
+    "$PWD" "$CXXFLAGS_JSON" > compile_commands.json
 
 echo "built: build/sgiandubh ($(du -h build/sgiandubh | cut -f1))$([ "$DEBUG" = 1 ] && echo ' [debug: ASan+UBSan]') — server + pure-C++ semiring decode, no spawn"
 echo "run:   ./build/sgiandubh package 8080"
