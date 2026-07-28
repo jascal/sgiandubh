@@ -70,94 +70,133 @@ struct Package {
         }
     }
 
-    // ---- word splitting: whitespace + punctuation peeling (matches the python spoke) --------------
+    // ---- word splitting: edge peeling, mirroring the python spoke exactly ------------------------
+    // Rules chosen by measurement against gold UD tokenization, not taste — see sgiandubh#37 and
+    // satzklar-model/scripts/tok_eval.py, which scores any candidate over treebank sentences whose
+    // raw text is reconstructible (SpaceAfter=No). On 3000 such sentences, exact-sentence accuracy:
+    //
+    //     peel-anywhere (what this used to do)   86.1%   token F1 0.9759
+    //     peel-at-edges (the python spoke)       88.1%   token F1 0.9797
+    //     this                                   95.9%   token F1 0.9946
+    //
+    // Peeling only at token EDGES is what makes 4:20, 1,24, Nr.1 and c't survive as single tokens
+    // without any special case, and it is why internal hyphens (Wort-Spiel) need no exception.
+    // On top of that, three classes both older tokenizers got wrong:
+    //   R1 runs        gold keeps -- (199), ... (244), `` (180), '' (171) whole. Only for the
+    //                  marks in RUNNABLE: gold SPLITS repeated ! and ? (406 single vs 5 merged).
+    //   R2 abbrev      Dr. Inc. St. ca. bzw. … keep their period (Dr. alone 183x). No sentence-final
+    //                  carve-out — A/B'd at 2877 vs 2878 of 3000, so it is not justified.
+    //   R3 ordinals    digits + '.' is one token mid-sentence (27x) and NEVER sentence-final
+    //                  (0 against 255 split), so the carve-out here IS justified.
+    //   R4 clitics     geht's -> geht + 's, c't stays whole (see the apostrophe notes below).
     static std::vector<std::string> split_words(const std::string& text) {
-        auto is_ascii_punct = [](unsigned char c) {
-            return std::ispunct(c) && c != '-';  // keep hyphens inside words (UD German convention)
+        // Punctuation. '-' IS peelable: gold has 1779 bare '-' tokens and only '--' ever ends one.
+        // Multi-byte marks are listed explicitly because std::ispunct is byte-wise and ASCII-only.
+        static constexpr std::string_view MB_PUNCT[] = {
+            "\xC2\xAB", "\xC2\xBB",                          // «  »   (U+00AB / U+00BB)
+            "\xE2\x80\x9E", "\xE2\x80\x9C", "\xE2\x80\x9D",  // „  “  ” (U+201E / U+201C / U+201D)
+            "\xE2\x80\x9A", "\xE2\x80\x98", "\xE2\x80\x99",  // ‚  ‘  ’ (U+201A / U+2018 / U+2019)
+            "\xE2\x80\x93", "\xE2\x80\x94", "\xC2\xA7",      // –  —  § (U+2013 / U+2014 / U+00A7)
         };
-        // German/Unicode quotation marks are multi-byte UTF-8, so std::ispunct (byte-wise,
-        // ASCII-only) never sees them and the (c & 0x80) guard below skips them. Peel them
-        // explicitly, kept in sync with the reference spoke's _PUNCT (german_parser_spoke.py).
-        // Without this, „e“ survived as one fused token, was tagged PUNCT, and — for a single
-        // quoted letter — became the parse root, wrecking the tree. See satzklar-model#1.
-        static constexpr std::string_view MULTIBYTE_PUNCT[] = {
-            "\xC2\xAB", "\xC2\xBB",                          // «  »    (U+00AB / U+00BB guillemets)
-            "\xE2\x80\x9E", "\xE2\x80\x9C", "\xE2\x80\x9D",  // „  “  ”  (U+201E / U+201C / U+201D)
-            "\xE2\x80\x9A", "\xE2\x80\x98", "\xE2\x80\x99",  // ‚  ‘  ’  (U+201A / U+2018 / U+2019)
-        };
-        auto multibyte_len_at = [&](size_t i) -> size_t {
-            for (std::string_view g : MULTIBYTE_PUNCT)
-                if (text.compare(i, g.size(), g.data(), g.size()) == 0) return g.size();
-            return 0;
-        };
-        // ---- apostrophes (sgiandubh#37) ---------------------------------------------------------
-        // An apostrophe is not punctuation to peel — in UD German it is nearly always part of a
-        // token. train_union.conllu (3.06M tokens) has 1486 tokens with an INTERNAL apostrophe
-        // against 377 with a leading one, and only 59 standalone: c't 891x (PROPN), 's 105x (PRON).
-        // Two rules, because one does not cover it: an apostrophe flanked by word characters stays
-        // inside its token (c't), EXCEPT when what follows it is a bare clitic, where the split
-        // goes BEFORE the apostrophe and it travels with the clitic (geht's -> geht + 's).
-        // Peeling it as punctuation gave c/'/t-Redaktion and Geht/'/s, matching neither.
-        // U+2019 needs this too: it is in MULTIBYTE_PUNCT as a closing single quote, but doubles as
-        // the typographic apostrophe, so #34 made Geht’s split where it previously survived.
-        // Checked BEFORE the punctuation branches below, which would otherwise claim these bytes.
+        static const std::set<std::string> RUNNABLE = {
+            ".", "`", "'", "-", "\xE2\x80\x93", "\xE2\x80\x94", "\xC2\xA7"};
+        static const std::set<std::string> ABBREV = {
+            "dr.", "prof.", "st.", "nr.", "inc.", "ca.", "bzw.", "etc.", "usw.", "vgl.", "ggf.",
+            "evtl.", "u.a.", "z.b.", "d.h.", "sog.", "inkl.", "exkl.", "max.", "min.", "mio.",
+            "mrd.", "jh.", "jhd.", "abb.", "tab.", "s.", "b.", "w.", "v.", "a.", "m.", "hr.",
+            "fr.", "co.", "ltd."};
         static const std::set<std::string> CLITICS = {"s", "ne", "nen", "nem", "n"};
-        auto is_word_byte = [](unsigned char c) { return (c & 0x80) || std::isalnum(c); };
-        auto apos_len_at = [&](size_t i) -> size_t {
-            if (text[i] == '\'') return 1;
-            if (text.compare(i, 3, "\xE2\x80\x99", 3) == 0) return 3;  // ’ U+2019
-            return 0;
+
+        auto is_ascii_punct = [](unsigned char c) { return c < 0x80 && std::ispunct(c); };
+        auto lower = [](std::string s) {
+            for (char& ch : s)
+                if (!((unsigned char)ch & 0x80)) ch = (char)std::tolower((unsigned char)ch);
+            return s;
         };
-        // Length of a clitic at p, only if it runs to a word boundary — so "geht's" splits but
-        // "c't-Redaktion" does not (there the run after ' is "t", and a '-' follows, not a break).
-        auto clitic_len_at = [&](size_t p) -> size_t {
-            size_t q = p;
-            while (q < text.size() && !((unsigned char)text[q] & 0x80) &&
-                   std::isalpha((unsigned char)text[q])) q++;
-            if (q == p) return 0;
-            std::string w = text.substr(p, q - p);
-            for (char& ch : w) ch = (char)std::tolower((unsigned char)ch);
-            if (!CLITICS.count(w)) return 0;
-            if (q < text.size() && is_word_byte((unsigned char)text[q])) return 0;
-            return q - p;
+        // Byte length of the punctuation mark starting at i (0 if none).
+        auto punct_at = [&](const std::string& s, size_t i) -> size_t {
+            for (std::string_view g : MB_PUNCT)
+                if (s.compare(i, g.size(), g.data(), g.size()) == 0) return g.size();
+            return is_ascii_punct((unsigned char)s[i]) ? 1 : 0;
         };
+        // Byte length of the punctuation mark ENDING the string (0 if none).
+        auto punct_end = [&](const std::string& s) -> size_t {
+            for (std::string_view g : MB_PUNCT)
+                if (s.size() >= g.size() &&
+                    s.compare(s.size() - g.size(), g.size(), g.data(), g.size()) == 0)
+                    return g.size();
+            return (!s.empty() && is_ascii_punct((unsigned char)s.back())) ? 1 : 0;
+        };
+        auto all_digits_dot = [](const std::string& s) {          // R3: "31."
+            if (s.size() < 2 || s.back() != '.') return false;
+            for (size_t k = 0; k + 1 < s.size(); k++)
+                if (!std::isdigit((unsigned char)s[k])) return false;
+            return true;
+        };
+        // R4: does an apostrophe at k introduce a bare clitic that ends the token?
+        auto clitic_at = [&](const std::string& s, size_t k) -> size_t {
+            size_t alen = 0;
+            if (s[k] == '\'') alen = 1;
+            else if (s.compare(k, 3, "\xE2\x80\x99", 3) == 0) alen = 3;
+            if (!alen) return 0;
+            std::string rest = lower(s.substr(k + alen));
+            return CLITICS.count(rest) ? alen : 0;
+        };
+
         std::vector<std::string> words;
-        std::string cur;
-        auto flush = [&] { if (!cur.empty()) { words.push_back(cur); cur.clear(); } };
+        std::vector<std::string> chunks;                          // whitespace split
         for (size_t i = 0; i < text.size();) {
-            unsigned char c = text[i];
-            if (std::isspace(c)) { flush(); i++; continue; }
-            if (size_t alen = apos_len_at(i)) {
-                if (size_t clen = clitic_len_at(i + alen)) {   // geht's → geht , 's   ('ne → 'ne)
-                    flush();                                    // no-op when the chunk starts here
-                    words.push_back(text.substr(i, alen + clen));
-                    i += alen + clen;
-                    continue;
-                }
-                if (!cur.empty() && i + alen < text.size() &&
-                    is_word_byte((unsigned char)text[i + alen])) {   // c't → one token
-                    cur.append(text, i, alen);
-                    i += alen;
-                    continue;
-                }
-                // Otherwise it is a real quote/isolated mark: fall through and peel as before.
-            }
-            if (size_t len = multibyte_len_at(i)) {         // multi-byte quote → own token
-                flush();
-                words.emplace_back(text, i, len);
-                i += len;
-                continue;
-            }
-            if ((c & 0x80) == 0 && is_ascii_punct(c)) {     // ASCII punctuation → own token
-                flush();
-                words.push_back(std::string(1, (char)c));
-                i++;
-                continue;
-            }
-            cur += (char)c;
-            i++;
+            if (std::isspace((unsigned char)text[i])) { i++; continue; }
+            size_t j = i;
+            while (j < text.size() && !std::isspace((unsigned char)text[j])) j++;
+            chunks.push_back(text.substr(i, j - i));
+            i = j;
         }
-        flush();
+        for (size_t ci = 0; ci < chunks.size(); ci++) {
+            std::string chunk = chunks[ci];
+            bool last_chunk = ci + 1 == chunks.size();
+            std::vector<std::string> leading, trailing;
+            while (!chunk.empty()) {
+                size_t plen = punct_at(chunk, 0);
+                if (!plen) break;
+                if (clitic_at(chunk, 0)) break;                   // 'ne is a token, not a quote
+                std::string mark = chunk.substr(0, plen);
+                size_t run = plen;
+                if (RUNNABLE.count(mark))                         // R1
+                    while (run < chunk.size() &&
+                           chunk.compare(run, plen, mark) == 0) run += plen;
+                if (run == chunk.size()) break;                   // all punctuation: leave whole
+                leading.push_back(chunk.substr(0, run));
+                chunk.erase(0, run);
+            }
+            while (!chunk.empty()) {
+                size_t plen = punct_end(chunk);
+                if (!plen) break;
+                if (ABBREV.count(lower(chunk))) break;            // R2
+                if (all_digits_dot(chunk) && !(last_chunk && trailing.empty())) break;  // R3
+                std::string mark = chunk.substr(chunk.size() - plen);
+                size_t run = plen;
+                if (RUNNABLE.count(mark))                         // R1
+                    while (run + plen <= chunk.size() &&
+                           chunk.compare(chunk.size() - run - plen, plen, mark) == 0) run += plen;
+                if (run == chunk.size()) break;
+                trailing.push_back(chunk.substr(chunk.size() - run));
+                chunk.erase(chunk.size() - run);
+            }
+            for (auto& t : leading) words.push_back(t);
+            if (!chunk.empty()) {                                 // R4: geht's -> geht + 's
+                size_t cut = 0, alen = 0;
+                for (size_t k = 1; k < chunk.size(); k++)
+                    if ((alen = clitic_at(chunk, k))) { cut = k; break; }
+                if (cut) {
+                    words.push_back(chunk.substr(0, cut));
+                    words.push_back(chunk.substr(cut));
+                } else {
+                    words.push_back(chunk);
+                }
+            }
+            for (auto it = trailing.rbegin(); it != trailing.rend(); ++it) words.push_back(*it);
+        }
         return words;
     }
 
