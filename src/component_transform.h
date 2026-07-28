@@ -113,6 +113,14 @@ struct Analysis {                        // shared machinery for transform + err
                 if (pos == "PUNCT") return "Interpunktion";
                 if ((w == "als" || w == "wie") && (base == "case" || base == "mark" || base == "cc"))
                     return "Konjunktion";
+                // A separable-verb prefix is identified by its DEPENDENCY, not its POS: "kam … an"
+                // makes the sentence's verb ankommen, and calling the prefix a preposition hides
+                // that. The two Verbzusatz branches below are gated on POS = VERB / PART, which
+                // between them match NONE of the 17963 compound:prt tokens in train_union.conllu
+                // (ADP 17279, ADV 521, ADJ 162, NOUN 1, PART/VERB zero) — so every separable prefix
+                // reached the ADP branch. See germandata#3. Tested on the FULL deprel, never base:
+                // base == "compound" would also catch noun compounds, which are not verb prefixes.
+                if (dep == "compound:prt") return "Verbzusatz";
                 if (pos == "ADP") return "Präposition";
                 if (G->interrog.count(w)) return "Interrogativpronomen";
                 if (G->pronword.count(w)) return "Pronomen";
