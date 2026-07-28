@@ -37,6 +37,29 @@ int main() {
     // In-word hyphen kept (UD German convention); ASCII quotes still peel as before.
     check("Das Wort-Spiel bleibt.", "Das Wort-Spiel bleibt .");
     check("ist das ein \"e\"?",     "ist das ein \" e \" ?");
+
+    // ---- apostrophes (sgiandubh#37) ---------------------------------------------------------
+    // Flanked by word characters → stays inside the token. Corpus: c't 891x PROPN.
+    check("Die c't-Redaktion testet.", "Die c't-Redaktion testet .");
+    check("Er liest die c't.",         "Er liest die c't .");
+    // ...EXCEPT before a bare clitic, where the split goes BEFORE the apostrophe and it travels
+    // with the clitic. Corpus: 's 105x PRON. Both the ASCII and the typographic apostrophe.
+    check("Geht's dir gut?",  "Geht 's dir gut ?");
+    check("Geht’s dir gut?",  "Geht ’s dir gut ?");
+    check("Wie geht's?",      "Wie geht 's ?");
+    // Chunk-initial clitic apostrophe is part of the token, not an opening quote.
+    check("Das ist 'ne gute Idee.", "Das ist 'ne gute Idee .");
+    check("Das ist 'n Buch.",       "Das ist 'n Buch .");
+    // An ASCII apostrophe used as a QUOTE still peels — the remainder is not a clitic, so the
+    // clitic rule does not fire and nothing here loosens quote handling.
+    check("Er sagte 'Hallo' laut.", "Er sagte ' Hallo ' laut .");
+    // A clitic-looking suffix that does not end the word is not a clitic (c't-Redaktion above
+    // covers the hyphen case; here the run after ' continues into more letters).
+    check("Die c'ts sind da.", "Die c'ts sind da .");
+    // Trailing apostrophe (genitive Gates') is deliberately NOT special-cased: it is ambiguous
+    // with a closing quote, and the corpus has 59 standalone ' against 18 Gates'. Documented in
+    // sgiandubh#37 as out of scope; this pins the current behavior so a change is deliberate.
+    check("Das ist Gates' Buch.", "Das ist Gates ' Buch .");
     printf("test_split_words: all passed\n");
     return 0;
 }
