@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -89,12 +90,58 @@ struct Package {
                 if (text.compare(i, g.size(), g.data(), g.size()) == 0) return g.size();
             return 0;
         };
+        // ---- apostrophes (sgiandubh#37) ---------------------------------------------------------
+        // An apostrophe is not punctuation to peel — in UD German it is nearly always part of a
+        // token. train_union.conllu (3.06M tokens) has 1486 tokens with an INTERNAL apostrophe
+        // against 377 with a leading one, and only 59 standalone: c't 891x (PROPN), 's 105x (PRON).
+        // Two rules, because one does not cover it: an apostrophe flanked by word characters stays
+        // inside its token (c't), EXCEPT when what follows it is a bare clitic, where the split
+        // goes BEFORE the apostrophe and it travels with the clitic (geht's -> geht + 's).
+        // Peeling it as punctuation gave c/'/t-Redaktion and Geht/'/s, matching neither.
+        // U+2019 needs this too: it is in MULTIBYTE_PUNCT as a closing single quote, but doubles as
+        // the typographic apostrophe, so #34 made Geht’s split where it previously survived.
+        // Checked BEFORE the punctuation branches below, which would otherwise claim these bytes.
+        static const std::set<std::string> CLITICS = {"s", "ne", "nen", "nem", "n"};
+        auto is_word_byte = [](unsigned char c) { return (c & 0x80) || std::isalnum(c); };
+        auto apos_len_at = [&](size_t i) -> size_t {
+            if (text[i] == '\'') return 1;
+            if (text.compare(i, 3, "\xE2\x80\x99", 3) == 0) return 3;  // ’ U+2019
+            return 0;
+        };
+        // Length of a clitic at p, only if it runs to a word boundary — so "geht's" splits but
+        // "c't-Redaktion" does not (there the run after ' is "t", and a '-' follows, not a break).
+        auto clitic_len_at = [&](size_t p) -> size_t {
+            size_t q = p;
+            while (q < text.size() && !((unsigned char)text[q] & 0x80) &&
+                   std::isalpha((unsigned char)text[q])) q++;
+            if (q == p) return 0;
+            std::string w = text.substr(p, q - p);
+            for (char& ch : w) ch = (char)std::tolower((unsigned char)ch);
+            if (!CLITICS.count(w)) return 0;
+            if (q < text.size() && is_word_byte((unsigned char)text[q])) return 0;
+            return q - p;
+        };
         std::vector<std::string> words;
         std::string cur;
         auto flush = [&] { if (!cur.empty()) { words.push_back(cur); cur.clear(); } };
         for (size_t i = 0; i < text.size();) {
             unsigned char c = text[i];
             if (std::isspace(c)) { flush(); i++; continue; }
+            if (size_t alen = apos_len_at(i)) {
+                if (size_t clen = clitic_len_at(i + alen)) {   // geht's → geht , 's   ('ne → 'ne)
+                    flush();                                    // no-op when the chunk starts here
+                    words.push_back(text.substr(i, alen + clen));
+                    i += alen + clen;
+                    continue;
+                }
+                if (!cur.empty() && i + alen < text.size() &&
+                    is_word_byte((unsigned char)text[i + alen])) {   // c't → one token
+                    cur.append(text, i, alen);
+                    i += alen;
+                    continue;
+                }
+                // Otherwise it is a real quote/isolated mark: fall through and peel as before.
+            }
             if (size_t len = multibyte_len_at(i)) {         // multi-byte quote → own token
                 flush();
                 words.emplace_back(text, i, len);
