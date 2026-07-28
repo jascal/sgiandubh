@@ -60,6 +60,28 @@ int main() {
     // with a closing quote, and the corpus has 59 standalone ' against 18 Gates'. Documented in
     // sgiandubh#37 as out of scope; this pins the current behavior so a change is deliberate.
     check("Das ist Gates' Buch.", "Das ist Gates ' Buch .");
+
+    // ---- edge peeling + measured rules (sgiandubh#37) -----------------------------------------
+    // Peeling only at token EDGES is what keeps these whole with no special case. Peel-anywhere
+    // split every one of them; against gold UD tokenization this took 86.1% -> 95.9% exact.
+    check("Bin 4:20 Minuten vor dem Termin.", "Bin 4:20 Minuten vor dem Termin .");
+    check("Er kostet 1,24 Euro.",             "Er kostet 1,24 Euro .");
+    check("Die Nr.1 im Land.",                "Die Nr.1 im Land .");
+    check("Wieso nicht 1/2h früher?",         "Wieso nicht 1/2h früher ?");
+    // R1: runs of these marks are ONE token (gold: -- 199x, ... 244x, `` 180x, '' 171x)...
+    check("Dr. Meier kam -- und ging...", "Dr. Meier kam -- und ging ...");
+    check("Es war ``gut'' gesagt.",       "Es war `` gut '' gesagt .");
+    // ...but NOT ! or ?, which gold splits (406 single against 5 merged).
+    check("Was!!! Wirklich???", "Was ! ! ! Wirklich ? ? ?");
+    // R2: abbreviations keep their period; no sentence-final carve-out (A/B'd, not justified).
+    check("Es kostet ca. 5 Euro etc.", "Es kostet ca. 5 Euro etc.");
+    // R3: an ordinal keeps its period mid-sentence, but never at the sentence end — gold has
+    // 0 sentence-final "NN." against 255 split, so both halves of this are measured.
+    check("Am 31. März 2001.",  "Am 31. März 2001 .");
+    check("Es waren nur 2001.", "Es waren nur 2001 .");
+    // '-' peels at edges (gold: 1779 bare '-'), which leaves internal hyphens alone for free.
+    check("Sonn- und Feiertage.",   "Sonn - und Feiertage .");
+    check("Das Wort-Spiel bleibt.", "Das Wort-Spiel bleibt .");
     printf("test_split_words: all passed\n");
     return 0;
 }
