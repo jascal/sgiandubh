@@ -56,6 +56,8 @@ struct Grammar {
 static const std::map<std::string, std::string> CASE_MAP = {
     {"Nom", "nominative"}, {"Acc", "accusative"}, {"Dat", "dative"}, {"Gen", "genitive"}};
 static const std::set<std::string> CLAUSE_DEPS = {"advcl", "ccomp", "csubj", "acl", "parataxis", "conj"};
+static const std::set<std::string> CLAUSE_POS = {"VERB", "AUX", "NOUN", "ADJ", "PROPN", "ADV"};
+static const std::set<std::string> CLAUSAL_KID = {"nsubj", "csubj", "cop", "aux"};
 
 struct Analysis {                        // shared machinery for transform + error rules
     std::vector<Tok> toks;               // toks[i-1]
@@ -72,6 +74,21 @@ struct Analysis {                        // shared machinery for transform + err
     std::map<int, std::string> clause_label;    // multi-clause labels (Hauptsatz/...)
 
     const Grammar* G = nullptr;
+
+    // Is this `conj` conjunct a clause, or just a coordinated phrase? POS cannot make the call:
+    // `Lehrerin` in `Er ist Arzt und sie Lehrerin.` (gapping — a real clause, the case the POS
+    // gate was there for) and `Peter` in `Anna und Peter kommen morgen.` (a noun phrase) are both
+    // conj + NOUN. Gating on POS alone promoted EVERY phrase-level conjunct to a second clause —
+    // `Anna kommen morgen` + a bogus `Hauptsatz` `und Peter`. The discriminator is clause-level
+    // material of the conjunct's own. See germandata#7.
+    bool clausal_conj(int i) const {
+        if (toks[i - 1].pos == "VERB" || toks[i - 1].pos == "AUX") return true;
+        auto it = by_head.find(i);
+        if (it == by_head.end()) return false;
+        for (int k : it->second)
+            if (CLAUSAL_KID.count(toks[k - 1].base)) return true;
+        return false;
+    }
 
     std::vector<int> subtree(int i) const {
         std::vector<int> out{i};
@@ -90,7 +107,11 @@ struct Analysis {                        // shared machinery for transform + err
         std::set<int> acl_heads, clause_bound;
         for (int i = 1; i <= n; i++) {
             if (toks[i - 1].deprel.rfind("acl", 0) == 0) acl_heads.insert(i);
-            if (CLAUSE_DEPS.count(toks[i - 1].base) && toks[i - 1].deprel.rfind("acl", 0) != 0)
+            // A phrase conjunct is no longer a clause head, so it is no longer a clause boundary
+            // either — this set has to track segment()'s walk or the two disagree about where a
+            // clause ends (the .dl bounds this on clause_head itself, via intervening_clause).
+            if (CLAUSE_DEPS.count(toks[i - 1].base) && toks[i - 1].deprel.rfind("acl", 0) != 0 &&
+                (toks[i - 1].base != "conj" || clausal_conj(i)))
                 clause_bound.insert(i);
         }
         std::set<int> relclause;
@@ -178,9 +199,8 @@ struct Analysis {                        // shared machinery for transform + err
             if (it == by_head.end()) return;
             for (int c : it->second) {
                 const Tok& t = toks[c - 1];
-                bool intro = CLAUSE_DEPS.count(t.base) &&
-                    (t.pos == "VERB" || t.pos == "AUX" || t.pos == "NOUN" || t.pos == "ADJ" ||
-                     t.pos == "PROPN" || t.pos == "ADV");
+                bool intro = CLAUSE_DEPS.count(t.base) && CLAUSE_POS.count(t.pos) &&
+                    (t.base != "conj" || clausal_conj(c));
                 walk(c, intro ? c : own);
             }
         };
