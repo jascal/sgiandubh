@@ -357,19 +357,39 @@ struct Analysis {                        // shared machinery for transform + err
         take(pred, "Prädikat");
         pred_members[ch] = pred;
         if (!head_verbal) {
+            // The promoted head's Prädikativ used to be "its subtree MINUS a blocklist", and the
+            // complement of a blocklist is not a constituent: a blocklisted token sitting INSIDE
+            // the kept material (`erst`, the `und` of an NP coordination, an apposition comma) was
+            // expelled and rendered after the whole group. So take the maximal contiguous RUN
+            // through the head instead, trimmed back to its outermost kept tokens — interior
+            // blocklisted tokens are absorbed because their position is evidence they belong, edge
+            // ones are trimmed because adjacency is not. Every group emitted here is a contiguous
+            // interval by construction. Detached kept-chunks fall through to the flat-leaf path,
+            // which is position-sorted — ordered, not yet grouped (stage B). See germandata#8.
             std::set<int> own;
             for (int j : subtree(ch)) own.insert(j);
             static const std::set<std::string> XB = {"punct", "cc", "mark", "advmod", "obl",
                                                      "vocative", "discourse"};
             static const std::set<std::string> XP = {"PUNCT", "CCONJ", "SCONJ", "ADV"};
-            std::vector<int> leftover;
+            std::set<int> cand, keep;
             for (int j : clauses.at(ch)) {
                 if (used.count(j) || !own.count(j)) continue;
+                cand.insert(j);
                 const Tok& t = toks[j - 1];
-                if (XB.count(t.base) || XP.count(t.pos)) continue;
-                leftover.push_back(j);
+                if (!XB.count(t.base) && !XP.count(t.pos)) keep.insert(j);
             }
-            take(leftover, "Prädikativ");
+            std::set<int> run{ch};
+            for (int j = ch + 1; cand.count(j); j++) run.insert(j);
+            for (int j = ch - 1; cand.count(j); j--) run.insert(j);
+            int lo = 0, hi = 0;
+            for (int j : run)
+                if (keep.count(j)) { if (!lo) lo = j; hi = j; }   // run is ascending
+            if (lo) {
+                std::vector<int> praedikativ;
+                for (int j : run)
+                    if (j >= lo && j <= hi) praedikativ.push_back(j);
+                take(praedikativ, "Prädikativ");
+            }
         }
         // remaining tokens become flat leaves at assembly time (not stored — derived from used)
         used_by_clause[ch] = used;
