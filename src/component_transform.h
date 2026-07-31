@@ -68,7 +68,9 @@ struct Analysis {                        // shared machinery for transform + err
     std::vector<int> sentence_punct;      // Satz-level tokens, in no clause (see segment())
     std::map<int, std::vector<int>> pred_chain, pred_members;   // per clause head
     // per clause: groups in python claim order: (anchor_or_min, label, members)
-    struct Group { int first; std::string label; std::vector<int> members; };
+    // `anchor` is the garg kid token that anchors the group, 0 for the Prädikat, the promoted-head
+    // Prädikativ leftover and lone leaves — precisely the groups a nested clause may not enter (#6).
+    struct Group { int first; std::string label; std::vector<int> members; int anchor = 0; };
     std::map<int, std::vector<Group>> groups;
     std::map<int, std::vector<int>> lone;       // singleton function leaves per clause
     std::map<int, std::string> clause_label;    // multi-clause labels (Hauptsatz/...)
@@ -270,14 +272,14 @@ struct Analysis {                        // shared machinery for transform + err
                 if (clause_of[j] == ch) st.push_back(j);
             return st;
         };
-        auto take = [&](const std::vector<int>& idxs, const std::string& label) {
+        auto take = [&](const std::vector<int>& idxs, const std::string& label, int anchor = 0) {
             std::vector<int> take_idx;
             for (int j : idxs)
                 if (mem.count(j) && !used.count(j)) take_idx.push_back(j);
             if (take_idx.empty()) return;
             std::sort(take_idx.begin(), take_idx.end());
             for (int j : take_idx) used.insert(j);
-            groups[ch].push_back({take_idx.front(), label, take_idx});
+            groups[ch].push_back({take_idx.front(), label, take_idx, anchor});
         };
 
         std::vector<int> pred;
@@ -317,9 +319,9 @@ struct Analysis {                        // shared machinery for transform + err
             const Tok& t = toks[k - 1];
             auto st = clause_subtree(k);
             const std::string& base = t.base;
-            if (base == "nsubj") take(st, "Subjekt");
-            else if (base == "obj") take(st, "Akkusativobjekt");
-            else if (base == "iobj") take(st, "Dativobjekt");
+            if (base == "nsubj") take(st, "Subjekt", k);
+            else if (base == "obj") take(st, "Akkusativobjekt", k);
+            else if (base == "iobj") take(st, "Dativobjekt", k);
             else if (base == "obl") {
                 std::string prep;
                 for (int j : st)
@@ -329,9 +331,9 @@ struct Analysis {                        // shared machinery for transform + err
                     G->governed.count(lem->second + "|" + prep);
                 bool any_dat = false;
                 for (int j : st) any_dat |= toks[j - 1].cas == "Dat";
-                if (gov) take(st, "Präpositionalobjekt");
-                else if (prep.empty() && t.deprel == "obl:arg" && any_dat) take(st, "Dativobjekt");
-                else if (prep.empty() && t.deprel == "obl:arg" && t.cas == "Acc") take(st, "Akkusativobjekt");
+                if (gov) take(st, "Präpositionalobjekt", k);
+                else if (prep.empty() && t.deprel == "obl:arg" && any_dat) take(st, "Dativobjekt", k);
+                else if (prep.empty() && t.deprel == "obl:arg" && t.cas == "Acc") take(st, "Akkusativobjekt", k);
                 else if (st.size() == 1 && prep.empty()) {
                     int j = st[0];
                     std::string& lf = toks[j - 1].leaf;
@@ -339,9 +341,9 @@ struct Analysis {                        // shared machinery for transform + err
                         lf = "Adverbiale";
                     used.insert(j);
                     lone[ch].push_back(j);
-                } else take(st, "Adverbiale");
+                } else take(st, "Adverbiale", k);
             } else if (base == "xcomp" && (t.pos == "ADJ" || t.pos == "NOUN" || t.pos == "PROPN")) {
-                take(st, "Prädikativ");
+                take(st, "Prädikativ", k);
             } else if (base == "advmod") {
                 if (st.size() == 1) {
                     int j = st[0];
@@ -349,7 +351,7 @@ struct Analysis {                        // shared machinery for transform + err
                     if (lf == "Adverb" || lf == "Adjektiv" || lf == "Numerale") lf = "Adverbiale";
                     used.insert(j);
                     lone[ch].push_back(j);
-                } else take(st, "Adverbiale");
+                } else take(st, "Adverbiale", k);
             }
         }
         take(pred, "Prädikat");
@@ -383,6 +385,48 @@ struct Analysis {                        // shared machinery for transform + err
         }
     }
 
+    // ---- placement: nest exactly the clauses that INTERRUPT their matrix (germandata#6) --------
+    // Flat siblings ordered by first token cannot express an embedded clause: a relative clause
+    // cutting into its matrix renders after the whole of it, in a position the sentence never had.
+    // Scoped to interruption — an extraposed clause already reads in surface order and stays flat.
+    // dl/transform.dl carries the normative rules; this computes the same predicate natively.
+    std::set<int> nested;                              // clause heads that moved
+    std::set<int> adopted;                             // tokens moved out of their matrix
+    std::map<int, int> adopt_of;                       // clause head -> comma it adopted
+    std::map<int, std::vector<int>> nested_in_group;   // group anchor -> clause heads
+    std::map<int, std::vector<int>> nested_in_clause;  // matrix clause head -> clause heads
+
+    void placement() {
+        for (auto& [ch, members] : clauses) {
+            if (clause_label.count(ch) && clause_label.at(ch) == "Hauptsatz") continue;
+            int h = toks[ch - 1].head;
+            if (h == 0) continue;
+            int m = clause_of[h];
+            if (m == 0 || m == ch || !clauses.count(m)) continue;
+            int lo = *std::min_element(members.begin(), members.end());
+            int hi = *std::max_element(members.begin(), members.end());
+            bool left = false, right = false;
+            for (int x : clauses.at(m)) { left |= x < lo; right |= x > hi; }
+            if (!(left && right)) continue;            // does not interrupt — leave it flat
+            int anchor = 0;
+            if (toks[ch - 1].deprel.rfind("acl", 0) == 0 && groups.count(m))
+                for (auto& gr : groups.at(m))
+                    if (gr.anchor && std::count(gr.members.begin(), gr.members.end(), h)) {
+                        anchor = gr.anchor;            // into the Satzglied the clause modifies
+                        break;
+                    }
+            if (anchor) nested_in_group[anchor].push_back(ch);
+            else nested_in_clause[m].push_back(ch);    // a pred anchor sits in no group
+            nested.insert(ch);
+            int j = hi + 1;                            // the closing comma of the pair belongs to it
+            if (j <= (int)toks.size() && toks[j - 1].word == "," && toks[j - 1].pos == "PUNCT" &&
+                clause_of[j] == m) {
+                adopt_of[ch] = j;
+                adopted.insert(j);
+            }
+        }
+    }
+
     void run(const Grammar& g) {
         G = &g;
         for (int i = 1; i <= (int)toks.size(); i++)
@@ -392,6 +436,7 @@ struct Analysis {                        // shared machinery for transform + err
         predicates();
         for (auto& [ch, _] : clauses) build_groups(ch);
         labels();
+        placement();
     }
 
     // ---- tree assembly (matches python build_clause ordering exactly) ------------------------
@@ -415,53 +460,76 @@ struct Analysis {                        // shared machinery for transform + err
         }
         return out;
     }
+    // Sort children by first token and derive every span from the leaves beneath it. Span text is
+    // derived data, which is what lets nesting chains fall out of plain node placement with no
+    // special casing. On a tree with nothing nested it is a no-op: children were already emitted
+    // in first-token order and a span was already the join of its sorted members.
+    std::vector<int> order_and_span(json& node) const {
+        if (!node.contains("children")) return {node.at("i").get<int>()};
+        std::vector<std::pair<std::vector<int>, json>> keyed;
+        for (auto& c : node["children"]) {
+            auto idxs = order_and_span(c);
+            if (!idxs.empty()) keyed.push_back({idxs, c});   // a group emptied by adoption vanishes
+        }
+        std::stable_sort(keyed.begin(), keyed.end(),
+                         [](const auto& a, const auto& b) { return a.first.front() < b.first.front(); });
+        json arr = json::array();
+        std::vector<int> all;
+        for (auto& k : keyed) {
+            arr.push_back(k.second);
+            all.insert(all.end(), k.first.begin(), k.first.end());
+        }
+        std::sort(all.begin(), all.end());
+        node["children"] = arr;
+        node["word"] = span(all);
+        return all;
+    }
+    json clause_node(int ch) const {
+        json n = build_clause(ch);
+        n["component"] = clause_label.count(ch) ? clause_label.at(ch) : std::string("Nebensatz");
+        return n;
+    }
     json build_clause(int ch) const {
-        std::vector<std::pair<int, json>> items;
+        json node = {{"word", ""}, {"component", nullptr}, {"children", json::array()}};
         auto git = groups.find(ch);
         if (git != groups.end())
             for (auto& gr : git->second) {
-                json node = {{"word", span(gr.members)}, {"component", gr.label},
-                             {"children", json::array()}};
-                for (int j : gr.members) node["children"].push_back(leaf_node(j));
-                items.push_back({gr.first, node});
+                json g = {{"word", ""}, {"component", gr.label}, {"children", json::array()}};
+                for (int j : gr.members)
+                    if (!adopted.count(j)) g["children"].push_back(leaf_node(j));
+                if (gr.anchor) {
+                    auto nit = nested_in_group.find(gr.anchor);
+                    if (nit != nested_in_group.end())
+                        for (int c : nit->second) g["children"].push_back(clause_node(c));
+                }
+                if (!g["children"].empty()) node["children"].push_back(g);
             }
         auto lit = lone.find(ch);
         if (lit != lone.end())
-            for (int j : lit->second) items.push_back({j, leaf_node(j)});
+            for (int j : lit->second)
+                if (!adopted.count(j)) node["children"].push_back(leaf_node(j));
         const auto& used = used_by_clause.at(ch);   // contains lone leaves too
         for (int j : clauses.at(ch))
-            if (!used.count(j)) items.push_back({j, leaf_node(j)});
-        std::sort(items.begin(), items.end(),
-                  [](const auto& a, const auto& b) { return a.first < b.first; });
-        std::vector<int> mem = clauses.at(ch);
-        std::sort(mem.begin(), mem.end());
-        json node = {{"word", span(mem)}, {"component", nullptr}, {"children", json::array()}};
-        for (auto& it2 : items) node["children"].push_back(it2.second);
+            if (!used.count(j) && !adopted.count(j)) node["children"].push_back(leaf_node(j));
+        auto nit = nested_in_clause.find(ch);
+        if (nit != nested_in_clause.end())
+            for (int c : nit->second) node["children"].push_back(clause_node(c));
+        auto ait = adopt_of.find(ch);
+        if (ait != adopt_of.end()) node["children"].push_back(leaf_node(ait->second));
         return node;
     }
     json tree() const {
-        std::vector<int> order;
-        for (auto& [ch, _] : clauses) order.push_back(ch);
-        std::sort(order.begin(), order.end(), [&](int a, int b) {
-            return *std::min_element(clauses.at(a).begin(), clauses.at(a).end()) <
-                   *std::min_element(clauses.at(b).begin(), clauses.at(b).end());
-        });
-        if (order.size() == 1) {
-            json root = build_clause(order[0]);
+        json root;
+        if (clauses.size() == 1) {
+            root = build_clause(clauses.begin()->first);
             root["component"] = "Satz";
-            return root;
+        } else {
+            root = {{"word", ""}, {"component", "Satz"}, {"children", json::array()}};
+            for (auto& [ch, _] : clauses)
+                if (!nested.count(ch)) root["children"].push_back(clause_node(ch));
+            for (int j : sentence_punct) root["children"].push_back(leaf_node(j));
         }
-        std::vector<int> all;
-        for (int i = 1; i <= (int)toks.size(); i++) all.push_back(i);
-        json root = {{"word", span(all)}, {"component", "Satz"}, {"children", json::array()}};
-        for (int ch : order) {
-            json n = build_clause(ch);
-            n["component"] = clause_label.at(ch);
-            root["children"].push_back(n);
-        }
-        // Satz-level leaves. python sorts all Satz children by position; sentence_punct is by
-        // definition the sentence's last token, so appending is that same order.
-        for (int j : sentence_punct) root["children"].push_back(leaf_node(j));
+        order_and_span(root);   // sorts every level by first token and fills in every span
         return root;
     }
 
