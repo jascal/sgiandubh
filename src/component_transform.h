@@ -277,10 +277,18 @@ struct Analysis {                        // shared machinery for transform + err
         for (int v : pred_chain.at(ch))
             if (v != ch && !std::count(pred.begin(), pred.end(), v)) pred.push_back(v);
         {
+            // The POS filter keeps non-verbal material out of the predicate complex, but a
+            // separable prefix is verbal by DEPENDENCY, not by POS (compound:prt is ADP 17279,
+            // ADV 521, ADJ 162, NOUN 1, PART/VERB zero) — so it undid the compound:prt append
+            // above for every separable verb. Same defect as germandata#3 one layer up: there a
+            // POS gate cost the prefix its label, here it cost the predicate its prefix.
+            // `kam … an` is ONE Prädikat, exactly as `hat … gelesen` already is. See germandata#4.
             std::set<int> ps;
             for (int p : pred) {
                 const Tok& t = toks[p - 1];
-                if (t.pos == "VERB" || t.pos == "AUX" || t.pos == "PART") ps.insert(p);
+                if (t.pos == "VERB" || t.pos == "AUX" || t.pos == "PART" ||
+                    t.deprel == "compound:prt")
+                    ps.insert(p);
             }
             pred.assign(ps.begin(), ps.end());
         }
@@ -367,9 +375,14 @@ struct Analysis {                        // shared machinery for transform + err
     }
 
     // ---- tree assembly (matches python build_clause ordering exactly) ------------------------
+    // `i` is the 1-based token index. Additive, and it makes every position-aware consumer exact
+    // rather than heuristic: without it, anything needing to know WHERE a constituent sits (the
+    // Satzklammer display, germanapp#268) has to align tokens back to the sentence by matching
+    // text, which is what produced a real bug on `das das` and repeated punctuation
+    // (germanapp#259). Groups carry no index — their extent is the indices of their children.
     json leaf_node(int j) const {
         const Tok& t = toks[j - 1];
-        json n = {{"word", t.word}, {"component", t.leaf}};
+        json n = {{"word", t.word}, {"component", t.leaf}, {"i", j}};
         auto it = CASE_MAP.find(t.cas);
         if (it != CASE_MAP.end()) n["case"] = it->second;
         return n;
