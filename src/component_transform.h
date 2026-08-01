@@ -149,7 +149,14 @@ struct Analysis {                        // shared machinery for transform + err
                 if (G->pronword.count(w)) return "Pronomen";
                 if (w.rfind("ander", 0) == 0 && (pos == "DET" || pos == "ADJ" || pos == "PRON"))
                     return "Adjektiv";
-                if ((pos == "ADV" || pos == "PART" || pos == "INTJ") && G->modalpart.count(w) &&
+                // The tag layer distinguishes the readings now (satzklar-model#7/#9): INTJ from
+                // the tagger is the answer-word / greeting reading (Ja., Nein., Hallo!), kept
+                // apart from the unstressed mid-field Modalpartikel (Das ist ja toll — ADV/PART).
+                // Sits ABOVE Modalpartikel so a discourse "Ja," keeps its interjection identity;
+                // the INTJ alternative Modalpartikel carried was unreachable in production until
+                // the tag layer could emit INTJ at all.
+                if (pos == "INTJ") return "Interjektion";
+                if ((pos == "ADV" || pos == "PART") && G->modalpart.count(w) &&
                     (base == "advmod" || base == "discourse" || base == "intj"))
                     return "Modalpartikel";
                 if (pos == "DET") return "Artikel";
