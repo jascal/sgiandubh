@@ -29,6 +29,7 @@ struct Grammar {
     std::vector<std::array<std::string, 3>> art_form;             // form, case, gender
     std::map<std::string, std::set<std::string>> prep_gov;        // prep -> governed cases
     std::map<std::string, std::set<std::string>> noun_read;       // noun form -> gender readings
+    std::map<std::string, std::string> contracted;                // fused prep form -> governed case
     bool loaded = false;
 
     bool load(const std::string& path) {
@@ -48,6 +49,8 @@ struct Grammar {
             for (auto& c : v) prep_gov[k].insert(c.get<std::string>());
         for (auto& [k, v] : g["noun_read"].items())
             for (auto& c : v) noun_read[k].insert(c.get<std::string>());
+        if (g.contains("contracted"))   // absent in packages exported before germandata#15
+            for (auto& [k, v] : g["contracted"].items()) contracted[k] = v.get<std::string>();
         loaded = true;
         return true;
     }
@@ -74,6 +77,7 @@ struct Analysis {                        // shared machinery for transform + err
     std::map<int, std::vector<Group>> groups;
     std::map<int, std::vector<int>> lone;       // singleton function leaves per clause
     std::map<int, std::string> clause_label;    // multi-clause labels (Hauptsatz/...)
+    std::map<int, std::string> case_ov;         // contracted-prep case override per token (#15)
 
     const Grammar* G = nullptr;
 
@@ -476,6 +480,21 @@ struct Analysis {                        // shared machinery for transform + err
         G = &g;
         for (int i = 1; i <= (int)toks.size(); i++)
             if (toks[i - 1].head != 0) by_head[toks[i - 1].head].push_back(i);
+        // A contracted preposition determines its noun's case (übers = über + das → Acc): the
+        // fused article is deterministic where the tagger's morph tag is not — trained on
+        // MWT-split corpora, it rarely sees fused forms (germandata#15). Display-scope only:
+        // grouping keeps the tagger case, and a leaf that emits no case gains none. The lowest
+        // case-child wins, matching the .dl's min-aggregate and the python twin's first-child.
+        for (int i = 1; i <= (int)toks.size(); i++) {
+            if (!CASE_MAP.count(toks[i - 1].cas) || !by_head.count(i)) continue;
+            for (int k : by_head.at(i)) {
+                const Tok& c = toks[k - 1];
+                if (c.pos == "ADP" && c.base == "case" && G->contracted.count(c.lower)) {
+                    case_ov[i] = G->contracted.at(c.lower);
+                    break;
+                }
+            }
+        }
         segment();
         leaf_types();
         predicates();
@@ -494,7 +513,10 @@ struct Analysis {                        // shared machinery for transform + err
         const Tok& t = toks[j - 1];
         json n = {{"word", t.word}, {"component", t.leaf}, {"i", j}};
         auto it = CASE_MAP.find(t.cas);
-        if (it != CASE_MAP.end()) n["case"] = it->second;
+        if (it != CASE_MAP.end()) {
+            auto ov = case_ov.find(j);
+            n["case"] = ov == case_ov.end() ? it->second : CASE_MAP.at(ov->second);
+        }
         return n;
     }
     std::string span(const std::vector<int>& idxs) const {
