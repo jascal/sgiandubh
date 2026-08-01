@@ -191,13 +191,18 @@ struct Analysis {                        // shared machinery for transform + err
                 }
                 if (pos == "VERB") {
                     if (base == "compound" || dep == "compound:prt") return "Verbzusatz";
-                    for (int k : kids_of) {
-                        const Tok& kt = toks[k - 1];
-                        if (kt.pos == "AUX" && !G->modal.count(kt.lower)) return "Partizip";
-                    }
+                    // Infinitival zu outranks the participle heuristic: in `haben/sein + zu +
+                    // Infinitiv` ("Ich habe viel zu tun") the verb carries BOTH a non-modal AUX
+                    // kid and the zu, and it is an infinitive — a true perfect/passive participle
+                    // never carries infinitival zu. With Partizip first, every verb of that
+                    // construction rendered Partizip.
                     for (int k : kids_of) {
                         const Tok& kt = toks[k - 1];
                         if (kt.lower == "zu" && kt.pos == "PART") return "Infinitiv";
+                    }
+                    for (int k : kids_of) {
+                        const Tok& kt = toks[k - 1];
+                        if (kt.pos == "AUX" && !G->modal.count(kt.lower)) return "Partizip";
                     }
                     return "Verb";
                 }
