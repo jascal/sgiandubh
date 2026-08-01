@@ -108,7 +108,12 @@ struct Analysis {                        // shared machinery for transform + err
         int n = (int)toks.size();
         std::set<int> acl_heads, clause_bound;
         for (int i = 1; i <= n; i++) {
-            if (toks[i - 1].deprel.rfind("acl", 0) == 0) acl_heads.insert(i);
+            // An acl whose modified head is an interjection is a mis-parsed comma splice
+            // ("Danke, das hilft mir sehr."): relative clauses modify nominals, never
+            // interjections. Labelled Hauptsatz in labels(); marks no relative pronouns here.
+            if (toks[i - 1].deprel.rfind("acl", 0) == 0 &&
+                !(toks[i - 1].head > 0 && toks[toks[i - 1].head - 1].pos == "INTJ"))
+                acl_heads.insert(i);
             // A phrase conjunct is no longer a clause head, so it is no longer a clause boundary
             // either — this set has to track segment()'s walk or the two disagree about where a
             // clause ends (the .dl bounds this on clause_head itself, via intervening_clause).
@@ -363,7 +368,11 @@ struct Analysis {                        // shared machinery for transform + err
         }
         take(pred, "Prädikat");
         pred_members[ch] = pred;
-        if (!head_verbal) {
+        // INTJ is excluded: the promoted-head Prädikativ encodes "a verbless clause is an
+        // elliptical copular predication", which holds for nominal heads (Schönes Wetter heute!)
+        // but not for an interjection utterance — there is no elided "ist" in "Oh!". An
+        // INTJ-headed clause emits no Prädikativ; its leaves stay flat under the clause.
+        if (!head_verbal && head_tok.pos != "INTJ") {
             // The promoted head's Prädikativ used to be "its subtree MINUS a blocklist", and the
             // complement of a blocklist is not a constituent: a blocklisted token sitting INSIDE
             // the kept material (`erst`, the `und` of an NP coordination, an apposition comma) was
@@ -407,7 +416,10 @@ struct Analysis {                        // shared machinery for transform + err
         for (auto& [ch, _] : clauses) {
             const Tok& t = toks[ch - 1];
             if (t.head == 0 || t.base == "conj" || t.base == "parataxis") clause_label[ch] = "Hauptsatz";
-            else if (t.deprel.rfind("acl", 0) == 0) clause_label[ch] = "Relativsatz";
+            else if (t.deprel.rfind("acl", 0) == 0)
+                // off an interjection the acl is a mis-parsed comma splice — the clause is the
+                // Hauptsatz it actually is (see acl_heads in leaf_types)
+                clause_label[ch] = toks[t.head - 1].pos == "INTJ" ? "Hauptsatz" : "Relativsatz";
             else clause_label[ch] = "Nebensatz";
         }
     }
