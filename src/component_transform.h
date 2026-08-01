@@ -334,6 +334,12 @@ struct Analysis {                        // shared machinery for transform + err
             if (base == "nsubj") take(st, "Subjekt", k);
             else if (base == "obj") take(st, "Akkusativobjekt", k);
             else if (base == "iobj") take(st, "Dativobjekt", k);
+            else if ((base == "obl" || base == "advmod") && t.pos == "INTJ") {
+                // A discourse interjection the parser labelled advmod/obl ("Ja, das stimmt." —
+                // gold says discourse) is not a Satzglied. No Adverbiale wrapper — the tokens
+                // fall through to flat leaves, exactly as when the parser says discourse.
+                // Subjekt/objects stay grouped: in "Ja ist eine Antwort" the Ja IS the subject.
+            }
             else if (base == "obl") {
                 std::string prep;
                 for (int j : st)
