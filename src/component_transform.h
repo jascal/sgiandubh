@@ -117,7 +117,11 @@ struct Analysis {                        // shared machinery for transform + err
             // A phrase conjunct is no longer a clause head, so it is no longer a clause boundary
             // either — this set has to track segment()'s walk or the two disagree about where a
             // clause ends (the .dl bounds this on clause_head itself, via intervening_clause).
-            if (CLAUSE_DEPS.count(toks[i - 1].base) && toks[i - 1].deprel.rfind("acl", 0) != 0 &&
+            // That means the POS gate applies here too: a token whose POS cannot head a clause
+            // (e.g. an INTJ the parser attached as ccomp, the satzklar-model#12 family) is not a
+            // clause head in segment() and so must not act as a boundary here either.
+            if (CLAUSE_DEPS.count(toks[i - 1].base) && CLAUSE_POS.count(toks[i - 1].pos) &&
+                toks[i - 1].deprel.rfind("acl", 0) != 0 &&
                 (toks[i - 1].base != "conj" || clausal_conj(i)))
                 clause_bound.insert(i);
         }
