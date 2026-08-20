@@ -222,6 +222,8 @@ class Transform {
         if (P.j["features"].contains("case_display"))
             for (auto& [k, v] : P.j["features"]["case_display"].items())
                 case_display[k] = v.get<std::string>();
+        // a clitic that is part of the verb form carries no case FUNCTION
+        case_exclude = P.feature_set("case_display_exclude_deprels");
 
         mark_relative_clauses();
         apply_contracted_case();
@@ -240,6 +242,7 @@ class Transform {
         forbid_rel_head, sent_final;
     std::string rel_base;
     std::map<std::string, std::string> case_display;
+    std::set<std::string> case_exclude;      // deprels whose leaves show no case
     std::map<int, int> clause_of;
     std::map<int, std::vector<int>> clauses;
     std::set<int> sentence_punct;
@@ -338,7 +341,7 @@ class Transform {
     json leaf_node(int i) {
         const Tok& t = toks[i - 1];
         json node = {{"word", t.word}, {"component", P.label(t.leaf)}, {"i", i}};
-        if (case_display.count(t.cas))
+        if (case_display.count(t.cas) && !case_exclude.count(t.deprel))
             node["case"] = case_display.at(t.case_ov.empty() ? t.cas : t.case_ov);
         return node;
     }
