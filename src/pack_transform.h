@@ -146,6 +146,16 @@ inline bool tok_match(json& cond, int i, Ctx& C) {
             if (!child_match(spec, i, C)) return false;
         } else if (atom == "no_child") {
             if (child_match(spec, i, C)) return false;
+        } else if (atom == "head_has_child") {
+            // a sibling test: does the token's HEAD have another dependent like
+            // this? (the ditransitive test behind Spanish's indirect object)
+            if (!t.head) return false;
+            auto it = C.by_head->find(t.head);
+            bool hit = false;
+            if (it != C.by_head->end())
+                for (int k : it->second)
+                    if (k != i && tok_match(spec, k, C)) { hit = true; break; }
+            if (!hit) return false;
         } else if (atom == "pos_in") {
             if (!C.P->values(spec).count(t.pos)) return false;
         } else if (atom == "pos_not_in") {
