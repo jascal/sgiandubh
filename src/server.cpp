@@ -804,6 +804,7 @@ int main(int argc, char** argv) {
                         }
                         packtrans::Transform tr(npack);
                         a["componentTree"] = tr.run(pt);
+                        a["errors"] = tr.errors();
                     } else if (ngram_de.loaded) {   // certified layer: component tree + register-backed error flags
                         std::vector<ctrans::Tok> ct;
                         for (size_t i = 0; i < p.words.size(); i++) {

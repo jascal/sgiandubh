@@ -33,10 +33,45 @@ struct Tok {
     std::string case_ov;
 };
 
+// Lexicon lookups are on the lowercased form, so lowercasing must match Python's
+// str.lower() for the letters these languages use: ASCII plus Latin-1 Supplement
+// (ÄÖÜ, ÁÉÍÓÚÑ) and Latin Extended-A. A byte-wise tolower() would leave every
+// accented word unmatched by its register entry.
+inline std::string utf8_lower(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x80) {
+            out += (char)std::tolower(c);
+            i += 1;
+        } else if ((c == 0xC3) && i + 1 < s.size()) {           // U+00C0..U+00FF
+            unsigned char d = (unsigned char)s[i + 1];
+            if (d >= 0x80 && d <= 0x9E && d != 0x97) d += 0x20;  // × (U+00D7) is not a letter
+            out += (char)c;
+            out += (char)d;
+            i += 2;
+        } else if ((c == 0xC4 || c == 0xC5) && i + 1 < s.size()) {   // Latin Extended-A
+            unsigned char d = (unsigned char)s[i + 1];
+            unsigned int cp = ((c & 0x1Fu) << 6) | (d & 0x3Fu);
+            if (cp >= 0x100 && cp <= 0x17F && (cp % 2 == 0)) cp += 1;   // even = upper
+            out += (char)(0xC0 | (cp >> 6));
+            out += (char)(0x80 | (cp & 0x3F));
+            i += 2;
+        } else {
+            out += s[i];
+            i += 1;
+        }
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------- the pack
 struct Pack {
     json j;
     std::map<std::string, std::set<std::string>> cache;   // resolved rule operands
+    std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, std::string>>>>
+        read_cache;                                       // resolved reading tables
 
     bool load(const std::string& path) {
         std::ifstream f(path);
@@ -70,6 +105,45 @@ struct Pack {
         return cache.emplace(key, std::move(out)).first->second;
     }
 
+    // A register is looked up on the written form or the lowercase one — a
+    // property of the REGISTER, not the language (German nouns are capitalised;
+    // the article paradigm is written lowercase and must match a leading "Der").
+    bool case_sensitive(const std::string& reg) {
+        const json& f = j["features"];
+        if (!f.contains("case_sensitive_registers")) return false;
+        for (auto& r : f["case_sensitive_registers"])
+            if (r.get<std::string>() == reg) return true;
+        return false;
+    }
+
+    using Reading = std::pair<std::string, std::string>;   // ("Masc", "Sing"); "-" = unspecified
+
+    const std::map<std::string, std::vector<Reading>>& readings(const std::string& name) {
+        auto it = read_cache.find(name);
+        if (it != read_cache.end()) return it->second;
+        std::map<std::string, std::vector<Reading>> tab;
+        bool cs = case_sensitive(name);
+        if (j["lexicons"].contains(name) && j["lexicons"][name].is_object())
+            for (auto& [form, vals] : j["lexicons"][name].items()) {
+                std::string key = cs ? form : utf8_lower(form);
+                for (auto& v : vals) {
+                    std::string r = v.get<std::string>();
+                    size_t bar = r.find('|');
+                    Reading rd = bar == std::string::npos ? Reading{r, "-"}
+                                                          : Reading{r.substr(0, bar), r.substr(bar + 1)};
+                    auto& into = tab[key];
+                    if (std::find(into.begin(), into.end(), rd) == into.end()) into.push_back(rd);
+                }
+            }
+        return read_cache.emplace(name, std::move(tab)).first->second;
+    }
+
+    std::vector<Reading> read_of(const std::string& reg, const std::string& word) {
+        const auto& tab = readings(reg);
+        auto it = tab.find(case_sensitive(reg) ? word : utf8_lower(word));
+        return it == tab.end() ? std::vector<Reading>{} : it->second;
+    }
+
     const json& section(const char* name) const {
         static const json empty = json::object();
         auto it = j.find(name);
@@ -91,39 +165,6 @@ struct Ctx {
     std::vector<Tok>* toks;
     std::map<int, std::vector<int>>* by_head;
 };
-
-// Lexicon lookups are on the lowercased form, so lowercasing must match Python's
-// str.lower() for the letters these languages use: ASCII plus Latin-1 Supplement
-// (ÄÖÜ, ÁÉÍÓÚÑ) and Latin Extended-A. A byte-wise tolower() would leave every
-// accented word unmatched by its register entry.
-inline std::string utf8_lower(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (size_t i = 0; i < s.size();) {
-        unsigned char c = (unsigned char)s[i];
-        if (c < 0x80) {
-            out += (char)std::tolower(c);
-            i += 1;
-        } else if ((c == 0xC3) && i + 1 < s.size()) {           // U+00C0..U+00FF
-            unsigned char d = (unsigned char)s[i + 1];
-            if (d >= 0x80 && d <= 0x9E && d != 0x97) d += 0x20;  // × (U+00D7) is not a letter
-            out += (char)c;
-            out += (char)d;
-            i += 2;
-        } else if ((c == 0xC4 || c == 0xC5) && i + 1 < s.size()) {   // Latin Extended-A
-            unsigned char d = (unsigned char)s[i + 1];
-            unsigned int cp = ((c & 0x1Fu) << 6) | (d & 0x3Fu);
-            if (cp >= 0x100 && cp <= 0x17F && (cp % 2 == 0)) cp += 1;   // even = upper
-            out += (char)(0xC0 | (cp >> 6));
-            out += (char)(0x80 | (cp & 0x3F));
-            i += 2;
-        } else {
-            out += s[i];
-            i += 1;
-        }
-    }
-    return out;
-}
 
 inline bool ends_with(const std::string& s, const std::string& suf) {
     return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
@@ -586,6 +627,235 @@ class Transform {
         }
         if (labels.contains(t.base)) return labels[t.base].get<std::string>();
         return cl.value("default_label", std::string("SUB_CLAUSE"));
+    }
+
+    // ---- error rules (glossa/errors.py, same five templates) -------------
+  public:
+    json errors() {
+        json out = json::array();
+        if (!P.j.contains("errors")) return out;
+        std::set<std::pair<int, std::string>> flags, dropped;
+        for (auto& rule : P.j["errors"]) {
+            const std::string t = rule["template"].get<std::string>();
+            const std::string id = rule["id"].get<std::string>();
+            std::vector<int> hits;
+            if (t == "agreement") hits = err_agreement(rule);
+            else if (t == "subject_verb") hits = err_subject_verb(rule);
+            else if (t == "case_government") hits = err_case_government(rule);
+            else if (t == "verb_position") hits = err_verb_position(rule);
+            else if (t == "form_choice") hits = err_form_choice(rule);
+            for (int i : hits) flags.insert({i, id});
+        }
+        // one flag per NP: a rule that explains a phrase suppresses the named others
+        for (auto& rule : P.j["errors"]) {
+            if (!rule.contains("suppresses")) continue;
+            const std::string id = rule["id"].get<std::string>();
+            for (auto& o : rule["suppresses"]) {
+                std::string other = o.get<std::string>();
+                for (auto& [i, kind] : flags) {
+                    if (kind != id) continue;
+                    int head = toks[i - 1].head;
+                    for (auto& [j, k2] : flags)
+                        if (k2 == other && (toks[j - 1].head == head || toks[j - 1].head == i ||
+                                            j == head))
+                            dropped.insert({j, k2});
+                }
+            }
+        }
+        for (auto& f : flags)
+            if (!dropped.count(f)) out.push_back({{"index", f.first}, {"kind", f.second}});
+        return out;
+    }
+
+  private:
+    // `-` is UNSPECIFIED, not a value: UD omits Gender on invariant forms, so a
+    // reading with `-` agrees with anything in that slot.
+    static bool compatible(const std::vector<Pack::Reading>& a,
+                           const std::vector<Pack::Reading>& b) {
+        for (auto& x : a)
+            for (auto& y : b)
+                if ((x.first == y.first || x.first == "-" || y.first == "-") &&
+                    (x.second == y.second || x.second == "-" || y.second == "-"))
+                    return true;
+        return false;
+    }
+
+    std::vector<int> kids_of(int i) const {
+        auto it = by_head.find(i);
+        return it == by_head.end() ? std::vector<int>{} : it->second;
+    }
+
+    static std::set<std::string> json_set(const json& arr) {
+        std::set<std::string> out;
+        for (auto& x : arr) out.insert(x.get<std::string>());
+        return out;
+    }
+
+    std::vector<int> err_agreement(const json& rule) {
+        std::vector<int> out;
+        auto deprels = json_set(rule["deprel"]);
+        auto head_pos = json_set(rule["head_pos"]);
+        const std::string dep_reg = rule["dep_register"], head_reg = rule["head_register"];
+        std::set<std::string> exempt;
+        if (rule.contains("exempt_head_lexicon"))
+            exempt = P.values(json(std::string("@") + rule["exempt_head_lexicon"].get<std::string>()));
+        for (int i = 1; i <= n; i++) {
+            const Tok& t = toks[i - 1];
+            if (!deprels.count(t.base) || !t.head) continue;
+            const Tok& h = toks[t.head - 1];
+            if (!head_pos.count(h.pos)) continue;
+            if (!exempt.empty() && exempt.count(h.lower)) continue;
+            auto dr = P.read_of(dep_reg, t.word), hr = P.read_of(head_reg, h.word);
+            if (dr.empty() || hr.empty()) continue;     // unknown to the registers = silence
+            if (!compatible(dr, hr)) out.push_back(i);
+        }
+        return out;
+    }
+
+    std::vector<int> err_subject_verb(const json& rule) {
+        std::vector<int> out;
+        const std::string vr = rule["verb_register"], pr = rule["pron_register"],
+                          nr = rule["noun_register"];
+        for (int i = 1; i <= n; i++) {
+            const Tok& t = toks[i - 1];
+            if (t.pos != "VERB" && t.pos != "AUX") continue;
+            auto verb_r = P.read_of(vr, t.word);
+            if (verb_r.empty()) continue;
+            bool auxed = false;
+            for (int k : kids_of(i))
+                if (toks[k - 1].base == "aux" || toks[k - 1].base == "cop") { auxed = true; break; }
+            if (auxed) continue;                        // agreement lives on the auxiliary
+            int subj = 0;
+            for (int k : kids_of(i))
+                if (toks[k - 1].base == "nsubj") { subj = k; break; }
+            if (!subj) continue;
+            const Tok& s = toks[subj - 1];
+            std::vector<Pack::Reading> subj_r;
+            if (s.pos == "PRON") {
+                subj_r = P.read_of(pr, s.word);
+            } else if (s.pos == "NOUN" || s.pos == "PROPN") {
+                for (auto& r : P.read_of(nr, s.word)) {
+                    Pack::Reading rd{"3", r.second};
+                    if (std::find(subj_r.begin(), subj_r.end(), rd) == subj_r.end())
+                        subj_r.push_back(rd);
+                }
+            } else {
+                continue;
+            }
+            if (subj_r.empty()) continue;
+            if (!compatible(subj_r, verb_r)) out.push_back(i);
+        }
+        return out;
+    }
+
+    std::vector<int> err_case_government(const json& rule) {
+        std::vector<int> out;
+        const std::string det_reg = rule["det_register"], prep_reg = rule["prep_register"],
+                          noun_reg = rule["noun_register"];
+        for (int i = 1; i <= n; i++) {
+            const Tok& t = toks[i - 1];
+            if (t.pos != "ADP" || t.base != "case" || !t.head) continue;
+            auto gov = P.read_of(prep_reg, t.word);
+            if (gov.empty()) continue;
+            const Tok& h = toks[t.head - 1];
+            auto noun_r = P.read_of(noun_reg, h.word);
+            std::set<std::string> cases;
+            bool known = false;
+            for (int d : kids_of(t.head)) {
+                if (toks[d - 1].base != "det") continue;
+                for (auto& r : P.read_of(det_reg, toks[d - 1].word)) {   // ("Case", "Gender")
+                    for (auto& nrd : noun_r)
+                        if (nrd.first == r.second) { known = true; cases.insert(r.first); }
+                }
+            }
+            if (!known) continue;
+            bool sat = false;
+            for (auto& g : gov)
+                if (cases.count(g.first)) { sat = true; break; }
+            if (!sat) out.push_back(i);
+        }
+        return out;
+    }
+
+    std::vector<int> err_verb_position(const json& rule) {
+        std::vector<int> out;
+        const std::string mode = rule["mode"].get<std::string>();
+        const std::string main_role = rule.value("main_role", std::string("MAIN_CLAUSE"));
+        std::set<std::string> subord;
+        if (rule.contains("subord_lexicon"))
+            subord = P.values(json(std::string("@") + rule["subord_lexicon"].get<std::string>()));
+        for (auto& [ch, members] : clauses) {
+            const std::string role = clause_role(ch);
+            const auto& pred = preds.count(ch) ? preds.at(ch) : std::vector<int>{};
+            if (pred.empty()) continue;
+            std::vector<int> auxes;
+            for (int j : pred)
+                if (toks[j - 1].pos == "AUX") auxes.push_back(j);
+            bool head_verbal = toks[ch - 1].pos == "VERB" || toks[ch - 1].pos == "AUX";
+            int v = !auxes.empty() ? auxes.back() : (head_verbal ? ch : 0);
+            if (!v) continue;
+            if (mode == "final") {
+                if (role == main_role) continue;
+                bool introduced = false;
+                for (int j : members)
+                    if (toks[j - 1].base == "mark" && subord.count(toks[j - 1].lower) &&
+                        toks[j - 1].head == ch) { introduced = true; break; }
+                if (!introduced) continue;
+                for (int j : members)
+                    if (j > v && toks[j - 1].pos != "PUNCT" &&
+                        std::find(pred.begin(), pred.end(), j) == pred.end()) {
+                        out.push_back(v);
+                        break;
+                    }
+            } else if (mode == "v2") {
+                if (role != main_role || !head_verbal) continue;
+                std::vector<int> starts;
+                std::set<int> subj_starts;
+                for (auto& g : groups[ch]) {
+                    if (!g.anchor || g.members.empty()) continue;
+                    int first = *std::min_element(g.members.begin(), g.members.end());
+                    starts.push_back(first);
+                    if (toks[g.anchor - 1].base == "nsubj") subj_starts.insert(first);
+                }
+                for (int j : lone)
+                    if (clause_of.count(j) && clause_of.at(j) == ch) starts.push_back(j);
+                if (starts.empty()) continue;
+                int first = *std::min_element(starts.begin(), starts.end());
+                if (!subj_starts.count(first)) continue;
+                bool punct_before = false;
+                for (int j : members)
+                    if (j < v && toks[j - 1].pos == "PUNCT") { punct_before = true; break; }
+                if (punct_before) continue;
+                int before = 0;
+                for (int f : starts)
+                    if (f < v) before++;
+                if (before >= 2) out.push_back(v);
+            }
+        }
+        return out;
+    }
+
+    std::vector<int> err_form_choice(const json& rule) {
+        std::vector<int> out;
+        const std::string before_v = utf8_lower(rule["before_vowel"].get<std::string>()),
+                          before_c = utf8_lower(rule["before_consonant"].get<std::string>());
+        std::set<std::string> exc_v, exc_c;
+        if (rule.contains("vowel_exceptions"))
+            exc_v = P.values(json(std::string("@") + rule["vowel_exceptions"].get<std::string>()));
+        if (rule.contains("consonant_exceptions"))
+            exc_c = P.values(json(std::string("@") + rule["consonant_exceptions"].get<std::string>()));
+        const std::string vowels = "aeiou";
+        for (int i = 1; i < n; i++) {                    // needs a following token
+            const std::string& w = toks[i - 1].lower;
+            if (w != before_v && w != before_c) continue;
+            const std::string& nx = toks[i].lower;
+            if (nx.empty() || !std::isalpha((unsigned char)nx[0])) continue;
+            bool vowelish = vowels.find(nx[0]) != std::string::npos;
+            if (exc_v.count(nx)) vowelish = true;         // hour: vowel sound, consonant letter
+            else if (exc_c.count(nx)) vowelish = false;   // university: the other way
+            if ((vowelish && w == before_c) || (!vowelish && w == before_v)) out.push_back(i);
+        }
+        return out;
     }
 
     // ---- assembly (ordering, spans, nesting) ----------------------------

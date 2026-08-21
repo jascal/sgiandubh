@@ -25,7 +25,15 @@ int main(int argc, char** argv) {
         std::cerr << "cannot read pack " << argv[1] << "\n";
         return 2;
     }
-    long limit = argc > 3 ? std::stol(argv[3]) : 0;
+    long limit = 0;
+    std::string dump_errors;
+    for (int k = 3; k < argc; k++) {
+        std::string a = argv[k];
+        if (a == "--dump-errors" && k + 1 < argc) dump_errors = argv[++k];
+        else limit = std::stol(a);
+    }
+    std::ofstream ef;
+    if (!dump_errors.empty()) ef.open(dump_errors);
     std::ifstream f(argv[2]);
     if (!f) {
         std::cerr << "cannot read fixtures " << argv[2] << "\n";
@@ -39,6 +47,9 @@ int main(int argc, char** argv) {
         json rec = json::parse(line);
         packtrans::Transform tr(pack);
         json got = tr.run(packtrans::tokens_from_json(rec["tokens"]));
+        if (ef.is_open())
+            ef << json{{"sent_id", rec.value("sent_id", "?")}, {"errors", tr.errors()}}.dump()
+               << "\n";
         if (got == rec["tree"]) {
             same++;
         } else {
