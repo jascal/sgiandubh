@@ -19,6 +19,7 @@
 #include "../tok_ffi/tok_ffi.h"     // HF tokenizers via FFI — BPE tokenize for the rosetta-package path
 #include "neural_expert.h"           // neural-expert package: fieldrun BERT encoder + biaffine/tag heads
 #include "component_transform.h"     // certified UD->component transform + error rules (dl-gated port)
+#include "pack_transform.h"          // the same transform, driven by a glossa grammar pack (de/es/en)
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -745,9 +746,19 @@ int main(int argc, char** argv) {
     if (g_neural_pkg) {  // --- neural-expert: German UD parse + tags from the fieldrun BERT encoder + flat heads ---
         static nexp::Package np;
         if (!np.load(g_pkg)) { fprintf(stderr, "sgiandubh: --neural-package needs %s/{gbert.fieldrun.json,bundle.tokenizer.json,heads.json,heads.bin,meta.json}\n", g_pkg.c_str()); return 1; }
+        // Two transform paths, chosen by what the package carries. A package with a
+        // pack.json (a glossa grammar pack) is served by the language-generic
+        // transform; anything else keeps the German one, which is what the
+        // deployed packages contain and what germandata's cpp_gate.py gates.
         static ctrans::Grammar ngram_de;
-        if (!ngram_de.load(g_pkg + "/grammar.json"))
-            fprintf(stderr, "sgiandubh: no %s/grammar.json — componentTree/errors disabled\n", g_pkg.c_str());
+        static packtrans::Pack npack;
+        bool have_pack = npack.load(g_pkg + "/pack.json");
+        if (have_pack)
+            fprintf(stderr, "sgiandubh: pack-driven transform, lang=%s (%s)\n",
+                    npack.j.value("lang", "?").c_str(), npack.j.value("name", "").c_str());
+        else if (!ngram_de.load(g_pkg + "/grammar.json"))
+            fprintf(stderr, "sgiandubh: no %s/{pack,grammar}.json — componentTree/errors disabled\n",
+                    g_pkg.c_str());
         httplib::Server nsrv;
         static std::mutex nmu;
         nsrv.Post("/v1/chat/completions", [&](const httplib::Request& rq, httplib::Response& rs) {
@@ -777,7 +788,23 @@ int main(int argc, char** argv) {
                     }
                     a = json{{"answer", flat}, {"kind", "parse"}, {"tokens", toks},
                              {"citation", np.meta["citation"]}, {"model", np.meta["model"]}};
-                    if (ngram_de.loaded) {   // certified layer: component tree + register-backed error flags
+                    if (have_pack) {         // certified layer, pack-driven (any language)
+                        std::vector<packtrans::Tok> pt;
+                        for (size_t i = 0; i < p.words.size(); i++) {
+                            packtrans::Tok tk;
+                            tk.word = p.words[i];
+                            tk.lower = packtrans::utf8_lower(p.words[i]);
+                            tk.pos = p.pos[i];
+                            tk.deprel = p.deprel[i];
+                            tk.base = tk.deprel.substr(0, tk.deprel.find(':'));
+                            tk.head = p.head[i];
+                            tk.cas = p.case_[i];
+                            tk.gnn = p.gnn[i];
+                            pt.push_back(tk);
+                        }
+                        packtrans::Transform tr(npack);
+                        a["componentTree"] = tr.run(pt);
+                    } else if (ngram_de.loaded) {   // certified layer: component tree + register-backed error flags
                         std::vector<ctrans::Tok> ct;
                         for (size_t i = 0; i < p.words.size(); i++) {
                             ctrans::Tok tk;
@@ -811,10 +838,13 @@ int main(int argc, char** argv) {
         nsrv.Get("/health", [&](const httplib::Request&, httplib::Response& rs) {
             rs.set_content(json{{"ok", true}, {"engine", "neural-expert-c++"},
                                 {"build", SGIANDUBH_BUILD},
+                                {"transform", have_pack ? "pack" : (ngram_de.loaded ? "german" : "none")},
+                                {"lang", have_pack ? npack.j.value("lang", "?") : std::string("de")},
                                 {"task", np.meta["task"]}, {"dim", np.d}}.dump(), "application/json");
         });
         nsrv.Get("/catalog", [&](const httplib::Request&, httplib::Response& rs) {
             rs.set_content(json{{"kind", "neural-expert"}, {"task", np.meta["task"]},
+                                {"lang", have_pack ? npack.j.value("lang", "?") : std::string("de")},
                                 {"model", np.meta["model"]}, {"provenance", np.meta["provenance"]},
                                 {"abstains_on", np.meta["abstain"]}}.dump(), "application/json");
         });
