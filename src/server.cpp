@@ -802,8 +802,12 @@ int main(int argc, char** argv) {
                             tk.gnn = p.gnn[i];
                             pt.push_back(tk);
                         }
+                        // roles only when the caller asks: a request that does not
+                        // say is answered exactly as before (germandata's cpp_gate
+                        // never asks, and must keep passing)
+                        bool want_roles = !body.is_discarded() && body.value("roles", false);
                         packtrans::Transform tr(npack);
-                        a["componentTree"] = tr.run(pt);
+                        a["componentTree"] = tr.run(pt, want_roles);
                         a["errors"] = tr.errors();
                     } else if (ngram_de.loaded) {   // certified layer: component tree + register-backed error flags
                         std::vector<ctrans::Tok> ct;

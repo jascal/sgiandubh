@@ -254,7 +254,12 @@ class Transform {
   public:
     Transform(Pack& pack) : P(pack) {}
 
-    json run(const std::vector<Tok>& input) {
+    // `with_roles` adds the canonical role beside every display label. Off by
+    // default because the German served tree is gated byte-identical against
+    // germandata's; a caller comparing structures ACROSS languages asks for it,
+    // since labels differ per language and roles do not.
+    json run(const std::vector<Tok>& input, bool with_roles = false) {
+        roles = with_roles;
         toks = input;
         by_head.clear();
         n = (int)toks.size();
@@ -294,6 +299,7 @@ class Transform {
     std::string rel_base;
     std::map<std::string, std::string> case_display;
     std::set<std::string> case_exclude;      // deprels whose leaves show no case
+    bool roles = false;                      // emit the canonical role beside the label
     std::map<int, int> clause_of;
     std::map<int, std::vector<int>> clauses;
     std::set<int> sentence_punct;
@@ -389,9 +395,16 @@ class Transform {
         return "WORD";
     }
 
+    /** The display label, and the canonical role beside it when asked. */
+    void name(json& node, const std::string& role) {
+        node["component"] = P.label(role);
+        if (roles) node["role"] = role;
+    }
+
     json leaf_node(int i) {
         const Tok& t = toks[i - 1];
-        json node = {{"word", t.word}, {"component", P.label(t.leaf)}, {"i", i}};
+        json node = {{"word", t.word}, {"i", i}};
+        name(node, t.leaf);
         if (case_display.count(t.cas) && !case_exclude.count(t.deprel))
             node["case"] = case_display.at(t.case_ov.empty() ? t.cas : t.case_ov);
         return node;
@@ -915,8 +928,8 @@ class Transform {
                 if (g.role.empty()) {
                     node["children"].push_back(leaf_node(g.members.front()));
                 } else {
-                    json gnode = {{"word", span(g.members)}, {"component", P.label(g.role)},
-                                  {"children", json::array()}};
+                    json gnode = {{"word", span(g.members)}, {"children", json::array()}};
+                    name(gnode, g.role);
                     for (int j : g.members) gnode["children"].push_back(leaf_node(j));
                     node["children"].push_back(gnode);
                     if (g.anchor) anchor_of[g.anchor] = {ch, gi};
@@ -928,14 +941,14 @@ class Transform {
 
         if (order.size() == 1) {
             json root = nodes[order[0]];
-            root["component"] = P.label("SENTENCE");
+            name(root, "SENTENCE");
             order_and_span(root);
             return root;
         }
         std::map<int, std::string> role;
         for (int ch : order) {
             role[ch] = clause_role(ch);
-            nodes[ch]["component"] = P.label(role[ch]);
+            name(nodes[ch], role[ch]);
         }
 
         // nest exactly the clauses that INTERRUPT their matrix
@@ -999,7 +1012,8 @@ class Transform {
         for (int ch : order)
             if (!nest_group.count(ch) && !nest_clause.count(ch)) place_into(ch);
 
-        json root = {{"word", ""}, {"component", P.label("SENTENCE")}, {"children", json::array()}};
+        json root = {{"word", ""}, {"children", json::array()}};
+        name(root, "SENTENCE");
         for (int ch : order)
             if (!nested.count(ch)) root["children"].push_back(nodes[ch]);
         for (int j : sentence_punct) root["children"].push_back(leaf_node(j));
