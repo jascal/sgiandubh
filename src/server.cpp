@@ -95,7 +95,8 @@ static bool g_no_gram = false;            // --no-gram: disable the generative t
 static bool g_repl = false;               // --repl: interactive stdin loop for local testing (no server)
 static bool g_repl_plain = false;         // --plain: disable the fixed-input/footer REPL TUI (plain getline)
 static bool g_rosetta_pkg = false;
-static bool g_neural_pkg = false;         // --neural-package: serve a neural-expert package (German UD parse + tags)        // --rosetta-package: serve a rosetta expert package (manifest.json + tokenizer), host-side
+static bool g_neural_pkg = false;
+static std::vector<std::string> g_extra_packages;   // --package <lang>=<dir>, repeatable         // --neural-package: serve a neural-expert package (German UD parse + tags)        // --rosetta-package: serve a rosetta expert package (manifest.json + tokenizer), host-side
 
 static bool stop(const std::string& w) {
     static const std::set<std::string> S = {
@@ -730,6 +731,10 @@ int main(int argc, char** argv) {
         else if (a == "--plain") g_repl_plain = true;
         else if (a == "--rosetta-package") g_rosetta_pkg = true;
         else if (a == "--neural-package") g_neural_pkg = true;
+        // One process, several languages: repeat --package to load more experts beside
+        // the positional one. A single-package invocation is unchanged, which is what
+        // keeps the deployed German behaviour bit-identical.
+        else if (a == "--package") { std::string kv; sval(kv); g_extra_packages.push_back(kv); }
         // Tunable matching thresholds (defaults above are conservative; tune on a representative test set):
         else if (a == "--tau") fval(g_tau);                       // faithful lexical-Jaccard match
         else if (a == "--ground-cos") fval(g_cos_tau);            // min cosine to attach a supporting passage
@@ -743,24 +748,61 @@ int main(int argc, char** argv) {
     g_pkg = pos.size() > 0 ? pos[0] : "package";
     int port = pos.size() > 1 ? std::stoi(pos[1]) : 8080;
 
-    if (g_neural_pkg) {  // --- neural-expert: German UD parse + tags from the fieldrun BERT encoder + flat heads ---
-        static nexp::Package np;
-        if (!np.load(g_pkg)) { fprintf(stderr, "sgiandubh: --neural-package needs %s/{gbert.fieldrun.json,bundle.tokenizer.json,heads.json,heads.bin,meta.json}\n", g_pkg.c_str()); return 1; }
-        // Two transform paths, chosen by what the package carries. A package with a
-        // pack.json (a glossa grammar pack) is served by the language-generic
-        // transform; anything else keeps the German one, which is what the
-        // deployed packages contain and what germandata's cpp_gate.py gates.
-        static ctrans::Grammar ngram_de;
-        static packtrans::Pack npack;
-        bool have_pack = npack.load(g_pkg + "/pack.json");
-        if (have_pack)
-            fprintf(stderr, "sgiandubh: pack-driven transform, lang=%s (%s)\n",
-                    npack.j.value("lang", "?").c_str(), npack.j.value("name", "").c_str());
-        else if (!ngram_de.load(g_pkg + "/grammar.json"))
-            fprintf(stderr, "sgiandubh: no %s/{pack,grammar}.json — componentTree/errors disabled\n",
-                    g_pkg.c_str());
+    if (g_neural_pkg) {  // --- neural-expert: UD parse + tags from the fieldrun BERT encoder + flat heads ---
+        // One process can hold several experts — one per SOURCE language — so that a
+        // deployment serving de/es/en wakes ONE container instead of three. A request
+        // names its language ("lang" or "sourceLanguage"); one that names none gets the
+        // package given positionally, which is exactly what a single-package
+        // invocation has always done.
+        struct Expert {
+            std::string lang, dir;
+            nexp::Package np;
+            packtrans::Pack pack;      // glossa grammar pack: the language-generic transform
+            ctrans::Grammar gram;      // the German transform, for packages predating packs
+            bool have_pack = false;
+            std::mutex mu;             // per expert: Pack/Transform hold per-language caches
+        };
+        static std::vector<std::unique_ptr<Expert>> experts;
+        static std::map<std::string, Expert*> by_lang;
+
+        auto load_expert = [&](const std::string& lang_hint, const std::string& dir) -> Expert* {
+            auto ex = std::make_unique<Expert>();
+            ex->dir = dir;
+            if (!ex->np.load(dir)) {
+                fprintf(stderr, "sgiandubh: --neural-package needs %s/{gbert.fieldrun.json,"
+                        "bundle.tokenizer.json,heads.json,heads.bin,meta.json}\n", dir.c_str());
+                return nullptr;
+            }
+            ex->have_pack = ex->pack.load(dir + "/pack.json");
+            if (ex->have_pack) {
+                ex->lang = lang_hint.empty() ? ex->pack.j.value("lang", std::string("?")) : lang_hint;
+                fprintf(stderr, "sgiandubh: %s pack-driven transform (%s)\n",
+                        ex->lang.c_str(), ex->pack.j.value("name", "").c_str());
+            } else {
+                ex->lang = lang_hint.empty()
+                    ? ex->np.meta.value("language", std::string("de")) : lang_hint;
+                if (!ex->gram.load(dir + "/grammar.json"))
+                    fprintf(stderr, "sgiandubh: no %s/{pack,grammar}.json — componentTree/errors"
+                            " disabled\n", dir.c_str());
+            }
+            Expert* raw = ex.get();
+            experts.push_back(std::move(ex));
+            by_lang[raw->lang] = raw;
+            return raw;
+        };
+
+        Expert* fallback = load_expert("", g_pkg);
+        if (!fallback) return 1;
+        for (const std::string& kv : g_extra_packages) {
+            size_t eq = kv.find('=');
+            if (eq == std::string::npos) {
+                fprintf(stderr, "sgiandubh: --package wants <lang>=<dir>, got %s\n", kv.c_str());
+                return 1;
+            }
+            if (!load_expert(kv.substr(0, eq), kv.substr(eq + 1))) return 1;
+        }
+
         httplib::Server nsrv;
-        static std::mutex nmu;
         nsrv.Post("/v1/chat/completions", [&](const httplib::Request& rq, httplib::Response& rs) {
             std::string q;
             json body = json::parse(rq.body, nullptr, false);
@@ -768,12 +810,34 @@ int main(int argc, char** argv) {
                 for (auto& mm : body["messages"])
                     if (mm.value("role", "") == "user") q = mm.value("content", "");
             json a;
+            Expert* ex = fallback;
+            std::string want;
+            if (!body.is_discarded())
+                want = body.value("lang", body.value("sourceLanguage", std::string()));
+            if (!want.empty()) {
+                auto it = by_lang.find(want);
+                if (it == by_lang.end()) {
+                    // Naming a language this process did not load is answered, never
+                    // guessed: a German expert parses Spanish text perfectly happily.
+                    json langs = json::array();
+                    for (auto& [l, _e] : by_lang) langs.push_back(l);
+                    a = json{{"answer", ""}, {"kind", "abstain"}, {"reason", "language_not_loaded"},
+                             {"requested", want}, {"languages", langs}};
+                    json resp = {{"id", "nexp"}, {"object", "chat.completion"},
+                                 {"model", "sgiandubh-neural-expert"},
+                                 {"choices", json::array({json{{"index", 0}, {"finish_reason", "stop"},
+                                     {"message", json{{"role", "assistant"}, {"content", a.dump()}}}}})}};
+                    rs.set_content(resp.dump(), "application/json");
+                    return;
+                }
+                ex = it->second;
+            }
             {
-                std::lock_guard<std::mutex> lk(nmu);
+                std::lock_guard<std::mutex> lk(ex->mu);
                 std::vector<std::string> pretok;   // optional exact tokenization from the caller
                 if (!body.is_discarded() && body.contains("words"))
                     for (auto& w : body["words"]) pretok.push_back(w.get<std::string>());
-                auto p = np.parse(q, pretok);
+                auto p = ex->np.parse(q, pretok);
                 if (p.abstain) {
                     a = json{{"answer", ""}, {"kind", "abstain"}, {"reason", p.reason}};
                 } else {
@@ -787,8 +851,8 @@ int main(int argc, char** argv) {
                               + (p.case_[i] != "-" ? "/" + p.case_[i] : "") + "  ";
                     }
                     a = json{{"answer", flat}, {"kind", "parse"}, {"tokens", toks},
-                             {"citation", np.meta["citation"]}, {"model", np.meta["model"]}};
-                    if (have_pack) {         // certified layer, pack-driven (any language)
+                             {"citation", ex->np.meta["citation"]}, {"model", ex->np.meta["model"]}};
+                    if (ex->have_pack) {     // certified layer, pack-driven (any language)
                         std::vector<packtrans::Tok> pt;
                         for (size_t i = 0; i < p.words.size(); i++) {
                             packtrans::Tok tk;
@@ -806,10 +870,10 @@ int main(int argc, char** argv) {
                         // say is answered exactly as before (germandata's cpp_gate
                         // never asks, and must keep passing)
                         bool want_roles = !body.is_discarded() && body.value("roles", false);
-                        packtrans::Transform tr(npack);
+                        packtrans::Transform tr(ex->pack);
                         a["componentTree"] = tr.run(pt, want_roles);
                         a["errors"] = tr.errors();
-                    } else if (ngram_de.loaded) {   // certified layer: component tree + register-backed error flags
+                    } else if (ex->gram.loaded) {   // the German transform + register-backed errors
                         std::vector<ctrans::Tok> ct;
                         for (size_t i = 0; i < p.words.size(); i++) {
                             ctrans::Tok tk;
@@ -825,7 +889,7 @@ int main(int argc, char** argv) {
                             ct.push_back(tk);
                         }
                         json tree, errs;
-                        ctrans::analyze(ct, ngram_de, tree, errs);
+                        ctrans::analyze(ct, ex->gram, tree, errs);
                         a["componentTree"] = tree;
                         a["errors"] = errs;
                     }
@@ -840,20 +904,34 @@ int main(int argc, char** argv) {
             rs.set_content(json{{"object", "list"}, {"data", json::array({json{{"id", "sgiandubh-neural-expert"},
                                 {"object", "model"}}})}}.dump(), "application/json");
         });
+        auto language_list = [&]() {
+            json out = json::array();
+            for (auto& e : experts)
+                out.push_back(json{{"lang", e->lang},
+                                   {"transform", e->have_pack ? "pack" : (e->gram.loaded ? "german" : "none")},
+                                   {"task", e->np.meta.value("task", "")},
+                                   {"default", e.get() == fallback}});
+            return out;
+        };
         nsrv.Get("/health", [&](const httplib::Request&, httplib::Response& rs) {
             rs.set_content(json{{"ok", true}, {"engine", "neural-expert-c++"},
                                 {"build", SGIANDUBH_BUILD},
-                                {"transform", have_pack ? "pack" : (ngram_de.loaded ? "german" : "none")},
-                                {"lang", have_pack ? npack.j.value("lang", "?") : std::string("de")},
-                                {"task", np.meta["task"]}, {"dim", np.d}}.dump(), "application/json");
+                                {"transform", fallback->have_pack ? "pack"
+                                              : (fallback->gram.loaded ? "german" : "none")},
+                                {"lang", fallback->lang},
+                                {"languages", language_list()},
+                                {"task", fallback->np.meta["task"]}, {"dim", fallback->np.d}}
+                           .dump(), "application/json");
         });
         nsrv.Get("/catalog", [&](const httplib::Request&, httplib::Response& rs) {
-            rs.set_content(json{{"kind", "neural-expert"}, {"task", np.meta["task"]},
-                                {"lang", have_pack ? npack.j.value("lang", "?") : std::string("de")},
-                                {"model", np.meta["model"]}, {"provenance", np.meta["provenance"]},
-                                {"abstains_on", np.meta["abstain"]}}.dump(), "application/json");
+            rs.set_content(json{{"kind", "neural-expert"}, {"task", fallback->np.meta["task"]},
+                                {"lang", fallback->lang},
+                                {"languages", language_list()},
+                                {"model", fallback->np.meta["model"]},
+                                {"provenance", fallback->np.meta["provenance"]},
+                                {"abstains_on", fallback->np.meta["abstain"]}}.dump(), "application/json");
         });
-        fprintf(stderr, "sgiandubh neural-expert: %s on :%d\n", g_pkg.c_str(), port);
+        fprintf(stderr, "sgiandubh neural-expert: %zu language(s) on :%d\n", experts.size(), port);
         nsrv.listen("0.0.0.0", port);
         return 0;
     }
