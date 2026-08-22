@@ -228,25 +228,38 @@ struct Package {
                 }
                 return h;
             };
-            if (hits(meta["lang_gate"]["en"]) > hits(meta["lang_gate"]["de"])) {
+            // in-scope vs out-of-scope lists. A German package predates this and
+            // names them by language ("de" in, "en" out); a package for any other
+            // language says in/out, because an English expert reading the German
+            // package's gate would abstain on all of its own input.
+            const json& lg = meta["lang_gate"];
+            const json* in_ = nullptr;
+            const json* out_ = nullptr;
+            if (lg.contains("in") && lg.contains("out")) { in_ = &lg["in"]; out_ = &lg["out"]; }
+            else if (lg.contains("de") && lg.contains("en")) { in_ = &lg["de"]; out_ = &lg["en"]; }
+            if (in_ && out_ && hits(*out_) > hits(*in_)) {
                 r.abstain = true; r.reason = "language"; return r;
             }
         }
         // per-word WordPiece (supar SubwordField: no specials, empty -> [UNK], cap fix_len pieces)
         int fix_len = meta["pipeline"]["fix_len"].get<int>();
         uint32_t cls = meta["pipeline"]["cls_id"].get<uint32_t>();
+        // [UNK] is not the same id in every vocabulary (gbert 101, bert-base-cased
+        // 100): reading it from the package keeps the unknown-fraction abstention
+        // honest instead of counting a real subword as unknown.
+        uint32_t unk_id = meta["pipeline"].value("unk_id", 101u);
         std::vector<uint32_t> ids = {cls};
         std::vector<std::pair<size_t, size_t>> span;  // [start,end) into ids per word
         size_t unk = 0;
         for (auto& w : r.words) {
             uint32_t buf[64];
             int k = tk_encode(tok, w.c_str(), buf, 64);
-            if (k <= 0) { buf[0] = 101; k = 1; }
+            if (k <= 0) { buf[0] = unk_id; k = 1; }
             if (k > fix_len) k = fix_len;
             size_t s = ids.size();
             for (int i = 0; i < k; i++) ids.push_back(buf[i]);
             span.push_back({s, ids.size()});
-            for (int i = 0; i < k; i++) if (buf[i] == 101) unk++;
+            for (int i = 0; i < k; i++) if (buf[i] == unk_id) unk++;
         }
         if ((double)unk / (double)(ids.size() - 1) > ab["max_unk_frac"].get<double>()) {
             r.abstain = true; r.reason = "vocabulary"; return r;
