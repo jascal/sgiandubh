@@ -22,6 +22,13 @@ static void strip_roles(json& node) {
         for (auto& c : node["children"]) strip_roles(c);
 }
 
+/** So are spans. Same claim, same way of checking it. */
+static void strip_spans(json& node) {
+    for (const char* k : {"iStart", "iEnd", "start", "end"}) node.erase(k);
+    if (node.contains("children"))
+        for (auto& c : node["children"]) strip_spans(c);
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "usage: pack_transform_gate <pack.json> <fixtures.jsonl> [limit]\n";
@@ -33,12 +40,13 @@ int main(int argc, char** argv) {
         return 2;
     }
     long limit = 0;
-    bool roles = false;
+    bool roles = false, spans = false;
     std::string dump_errors, dump_trees;
     for (int k = 3; k < argc; k++) {
         std::string a = argv[k];
         if (a == "--dump-errors" && k + 1 < argc) dump_errors = argv[++k];
         else if (a == "--roles") roles = true;
+        else if (a == "--spans") spans = true;
         else if (a == "--dump-trees" && k + 1 < argc) dump_trees = argv[++k];
         else limit = std::stol(a);
     }
@@ -57,7 +65,10 @@ int main(int argc, char** argv) {
         if (limit && same + diff >= limit) break;
         json rec = json::parse(line);
         packtrans::Transform tr(pack);
-        json got = tr.run(packtrans::tokens_from_json(rec["tokens"]), roles);
+        // The fixture's own source text when it has one (en/es do, de does not),
+        // so character offsets are gated against the same input the spec used.
+        const std::string text = rec.value("text", std::string());
+        json got = tr.run(packtrans::tokens_from_json(rec["tokens"]), roles, spans, text);
         if (tf.is_open())
             tf << json{{"sent_id", rec.value("sent_id", "?")}, {"tree", got}}.dump() << "\n";
         if (ef.is_open())
@@ -65,6 +76,7 @@ int main(int argc, char** argv) {
                << "\n";
         json cmp = got;
         if (roles) strip_roles(cmp);
+        if (spans) strip_spans(cmp);
         if (cmp == rec["tree"]) {
             same++;
         } else {

@@ -250,6 +250,58 @@ inline bool tok_match(json& cond, int i, Ctx& C) {
 }
 
 // ---------------------------------------------------------------- transform
+// --- character offsets -------------------------------------------------------
+// Offsets are CODE POINT indices, not bytes. Python's str indexes code points and
+// a JS string indexes UTF-16 code units, which agree with code points for
+// everything below U+10000 — every umlaut, accent and quote these languages use.
+// Byte offsets agree with neither the moment the text stops being ASCII, so
+// counting them here would put this port out of step with the spec it is gated
+// against AND with the browser that consumes it.
+
+/** Decode UTF-8 to code points; malformed bytes pass through as themselves. */
+inline std::vector<char32_t> utf8_cps(const std::string& s) {
+    std::vector<char32_t> out;
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = (unsigned char)s[i];
+        int len = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 1;
+        char32_t cp = len == 1 ? c : (c & (0xFF >> (len + 1)));
+        for (int k = 1; k < len && i + k < s.size(); k++)
+            cp = (cp << 6) | ((unsigned char)s[i + k] & 0x3F);
+        out.push_back(cp);
+        i += len;
+    }
+    return out;
+}
+
+/** The fold table of glossa/engine.py, code point for code point. 1:1 so offsets survive. */
+inline char32_t fold_cp(char32_t c) {
+    switch (c) {
+        case 0x201C: case 0x201D: case 0x201E: case 0x201F: return U'"';
+        case 0x2018: case 0x2019: case 0x201A: case 0x201B: return U'\'';
+        case 0x2013: case 0x2014: case 0x2212: return U'-';
+        case 0x00A0: return U' ';
+        case 0x00E1: return U'a'; case 0x00E9: return U'e'; case 0x00ED: return U'i';
+        case 0x00F3: return U'o'; case 0x00FA: return U'u';
+        case 0x00C1: return U'A'; case 0x00C9: return U'E'; case 0x00CD: return U'I';
+        case 0x00D3: return U'O'; case 0x00DA: return U'U';
+        case 0x00FC: return U'u'; case 0x00DC: return U'U';
+        case 0x00F1: return U'n'; case 0x00D1: return U'N';
+        default: return c;
+    }
+}
+
+inline bool cp_space(char32_t c) {
+    if (c < 0x80) return c == U' ' || c == U'\t' || c == U'\n' || c == U'\r' || c == U'\f' || c == U'\v';
+    return c == 0x00A0 || (c >= 0x2000 && c <= 0x200A) || c == 0x2028 || c == 0x2029 ||
+           c == 0x202F || c == 0x205F || c == 0x3000;
+}
+
+inline std::vector<char32_t> folded_cps(const std::string& s) {
+    auto v = utf8_cps(s);
+    for (auto& c : v) c = fold_cp(c);
+    return v;
+}
+
 class Transform {
   public:
     Transform(Pack& pack) : P(pack) {}
@@ -258,8 +310,15 @@ class Transform {
     // default because the German served tree is gated byte-identical against
     // germandata's; a caller comparing structures ACROSS languages asks for it,
     // since labels differ per language and roles do not.
-    json run(const std::vector<Tok>& input, bool with_roles = false) {
+    // `with_spans` adds the extent of every node: iStart/iEnd (1-based inclusive
+    // token indices) always, and start/end CODE POINT offsets into `text` when a
+    // text is supplied. Off by default for the same reason roles are.
+    json run(const std::vector<Tok>& input, bool with_roles = false,
+             bool with_spans = false, const std::string& text = "") {
         roles = with_roles;
+        spans = with_spans;
+        cspans.clear();
+        if (spans && !text.empty()) cspans = char_spans(input, text);
         toks = input;
         by_head.clear();
         n = (int)toks.size();
@@ -300,6 +359,8 @@ class Transform {
     std::map<std::string, std::string> case_display;
     std::set<std::string> case_exclude;      // deprels whose leaves show no case
     bool roles = false;                      // emit the canonical role beside the label
+    bool spans = false;                      // emit iStart/iEnd (+ start/end with a text)
+    std::vector<std::pair<int, int>> cspans; // per token, {-1,-1} where unplaceable
     std::map<int, int> clause_of;
     std::map<int, std::vector<int>> clauses;
     std::set<int> sentence_punct;
@@ -401,12 +462,75 @@ class Transform {
         if (roles) node["role"] = role;
     }
 
+    /** Locate each token in `text`; {-1,-1} where it cannot be placed.
+     *
+     * The port of glossa/engine.py's char_spans, and it must stay the port: the
+     * differential gate compares this against that. Alignment is against the
+     * WRITTEN WORDS of the text rather than a search, because a free find matches
+     * a later occurrence of the same string and drags the cursor past everything
+     * between — AnCora expands the name particle *da* into `de` + `a`, and `de`
+     * matched "defensa de Brasil" thirty characters downstream. Those offsets were
+     * wrong rather than missing, which no equality check on the substring can see.
+     */
+    static std::vector<std::pair<int, int>> char_spans(const std::vector<Tok>& toks,
+                                                      const std::string& text) {
+        std::vector<char32_t> f = folded_cps(text);
+        const int n = (int)f.size();
+        std::vector<std::pair<int, int>> words;
+        for (int i = 0; i < n;) {
+            while (i < n && cp_space(f[i])) i++;
+            if (i >= n) break;
+            int j = i;
+            while (j < n && !cp_space(f[j])) j++;
+            words.push_back({i, j});
+            i = j;
+        }
+        std::vector<std::pair<int, int>> out;
+        size_t wi = 0;
+        int pos = words.empty() ? 0 : words[0].first;
+        int misses = 0;
+        for (const Tok& t : toks) {
+            std::vector<char32_t> w = folded_cps(t.word);
+            if (wi >= words.size()) { out.push_back({-1, -1}); continue; }
+            const int end_w = words[wi].second;
+            bool fits = !w.empty() && pos + (int)w.size() <= end_w;
+            if (fits)
+                for (size_t k = 0; k < w.size(); k++)
+                    if (f[pos + k] != w[k]) { fits = false; break; }
+            if (fits) {
+                out.push_back({pos, pos + (int)w.size()});
+                pos += (int)w.size();
+                misses = 0;
+                if (pos >= end_w) {
+                    wi++;
+                    pos = wi < words.size() ? words[wi].first : n;
+                }
+                continue;
+            }
+            out.push_back({-1, -1});
+            if (++misses >= 2) {            // a fused form the treebank expanded
+                wi++;
+                pos = wi < words.size() ? words[wi].first : n;
+                misses = 0;
+            }
+        }
+        return out;
+    }
+
     json leaf_node(int i) {
         const Tok& t = toks[i - 1];
         json node = {{"word", t.word}, {"i", i}};
         name(node, t.leaf);
         if (case_display.count(t.cas) && !case_exclude.count(t.deprel))
             node["case"] = case_display.at(t.case_ov.empty() ? t.cas : t.case_ov);
+        if (spans) {
+            node["iStart"] = i;
+            node["iEnd"] = i;
+            if (!cspans.empty() && cspans[i - 1].first >= 0) {
+                node["start"] = cspans[i - 1].first;
+                node["end"] = cspans[i - 1].second;
+            }
+        }
         return node;
     }
 
@@ -891,6 +1015,22 @@ class Transform {
         std::sort(all.begin(), all.end());
         node["children"] = kids;
         node["word"] = span(all);
+        if (spans && !all.empty()) {
+            node["iStart"] = all.front();
+            node["iEnd"] = all.back();
+            if (!cspans.empty()) {
+                // min/max over the tokens that were placed: the ENCLOSING extent,
+                // so a node an interrupting clause was lifted out of still covers
+                // the interruption, which is what a highlight should paint.
+                int lo = -1, hi = -1;
+                for (int j : all) {
+                    if (cspans[j - 1].first < 0) continue;
+                    if (lo < 0 || cspans[j - 1].first < lo) lo = cspans[j - 1].first;
+                    if (cspans[j - 1].second > hi) hi = cspans[j - 1].second;
+                }
+                if (lo >= 0) { node["start"] = lo; node["end"] = hi; }
+            }
+        }
         return all;
     }
 
