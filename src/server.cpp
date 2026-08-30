@@ -866,12 +866,15 @@ int main(int argc, char** argv) {
                             tk.gnn = p.gnn[i];
                             pt.push_back(tk);
                         }
-                        // roles only when the caller asks: a request that does not
-                        // say is answered exactly as before (germandata's cpp_gate
-                        // never asks, and must keep passing)
+                        // roles and spans only when the caller asks: a request that
+                        // does not say is answered exactly as before (germandata's
+                        // cpp_gate never asks, and must keep passing)
                         bool want_roles = !body.is_discarded() && body.value("roles", false);
+                        bool want_spans = !body.is_discarded() && body.value("spans", false);
                         packtrans::Transform tr(ex->pack);
-                        a["componentTree"] = tr.run(pt, want_roles);
+                        // `q` is the caller's own string, so start/end index THAT and
+                        // not some normalised copy the tokenizer worked from.
+                        a["componentTree"] = tr.run(pt, want_roles, want_spans, q);
                         a["errors"] = tr.errors();
                     } else if (ex->gram.loaded) {   // the German transform + register-backed errors
                         std::vector<ctrans::Tok> ct;
