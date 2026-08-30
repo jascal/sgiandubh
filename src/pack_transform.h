@@ -144,6 +144,101 @@ struct Pack {
         return it == tab.end() ? std::vector<Reading>{} : it->second;
     }
 
+    /** Everything the PACK can prove about one surface form.
+     *
+     * The certified half of a dictionary: lemma, morphological readings, closed-class
+     * membership and government, all read straight out of the lexicons this expert
+     * already holds in memory. No model, no network, and the same shape in every
+     * language, because the packs share a schema.
+     *
+     * What it does NOT do is invent. A form the registers do not know comes back
+     * `known: false` with whatever little was found, so a caller can tell "the
+     * lexicon says this lemma" from "a model guessed it" — the registers are mined
+     * from treebanks and their coverage is corpus-bound (English form2lemma has
+     * ~5.5k entries against German's ~14k), which makes that distinction the whole
+     * point rather than a detail.
+     */
+    json lexical(const std::string& word) {
+        // scope=form is load-bearing, not decoration. This answers about the FORM,
+        // not about an occurrence of it: German `der` is in the relative-pronoun
+        // register AND the article paradigm, and no amount of lexicon lookup can
+        // say which one "Der Mann" is. The parse can, so a caller that has a
+        // sentence should disambiguate with the token's deprel/POS and treat these
+        // as the candidate readings, not the answer.
+        json out = {{"word", word}, {"known", false}, {"scope", "form"}};
+        const json& lex = j["lexicons"];
+        const std::string low = utf8_lower(word);
+
+        // lemma
+        if (lex.contains("form2lemma") && lex["form2lemma"].is_object()) {
+            auto it = lex["form2lemma"].find(low);
+            if (it == lex["form2lemma"].end()) it = lex["form2lemma"].find(word);
+            if (it != lex["form2lemma"].end() && it->is_string()) {
+                out["lemma"] = it->get<std::string>();
+                out["known"] = true;
+            }
+        }
+
+        // morphological readings, whichever tables this pack carries
+        json readings_out = json::object();
+        for (const char* reg : {"noun_gn", "noun_gnum", "verb_pn", "adj_gn", "det_gn",
+                                "pron_pn", "art_gender", "art_case"}) {
+            if (!lex.contains(reg) || !lex[reg].is_object()) continue;
+            auto rs = read_of(reg, word);
+            if (rs.empty()) continue;
+            json arr = json::array();
+            for (auto& r : rs) arr.push_back(r.second == "-" ? json(r.first)
+                                                             : json(r.first + "|" + r.second));
+            readings_out[reg] = arr;
+            out["known"] = true;
+        }
+        if (!readings_out.empty()) out["readings"] = readings_out;
+
+        // closed-class membership: every lexicon that is a plain list of forms
+        json classes = json::array();
+        for (auto& [name, entries] : lex.items()) {
+            if (!entries.is_array()) continue;
+            for (auto& e : entries)
+                if (e.is_string() && (e.get<std::string>() == word ||
+                                      utf8_lower(e.get<std::string>()) == low)) {
+                    classes.push_back(name);
+                    out["known"] = true;
+                    break;
+                }
+        }
+        if (!classes.empty()) out["classes"] = classes;
+
+        // government: prepositions this lemma takes ("abbauen|in"), and for a
+        // preposition the case it governs
+        const std::string lemma = out.value("lemma", low);
+        const std::string gov_name = j["features"].value("governed_lexicon", std::string("governed"));
+        if (lex.contains(gov_name)) {
+            json takes = json::array();
+            for (auto& e : lex[gov_name]) {
+                if (!e.is_string()) continue;
+                const std::string v = e.get<std::string>();
+                size_t bar = v.find('|');
+                if (bar != std::string::npos && v.substr(0, bar) == lemma)
+                    takes.push_back(v.substr(bar + 1));
+            }
+            if (!takes.empty()) { out["governs"] = takes; out["known"] = true; }
+        }
+        if (lex.contains("prep_gov") && lex["prep_gov"].is_object()) {
+            auto it = lex["prep_gov"].find(low);
+            if (it != lex["prep_gov"].end()) { out["governsCase"] = *it; out["known"] = true; }
+        }
+        if (lex.contains("contracted") && lex["contracted"].is_object()) {
+            auto it = lex["contracted"].find(low);
+            if (it != lex["contracted"].end()) { out["contraction"] = *it; out["known"] = true; }
+        }
+
+        out["provenance"] = {{"lang", j.value("lang", "?")},
+                             {"pack", j.value("name", "")},
+                             {"version", j.value("version", "")},
+                             {"lexicons", j.value("provenance", json::object()).value("lexicons", "")}};
+        return out;
+    }
+
     const json& section(const char* name) const {
         static const json empty = json::object();
         auto it = j.find(name);
