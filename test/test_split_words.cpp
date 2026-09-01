@@ -82,6 +82,22 @@ int main() {
     // '-' peels at edges (gold: 1779 bare '-'), which leaves internal hyphens alone for free.
     check("Sonn- und Feiertage.",   "Sonn - und Feiertage .");
     check("Das Wort-Spiel bleibt.", "Das Wort-Spiel bleibt .");
+
+    // ---- Spanish inverted marks (glossa#es-inverted) ------------------------------------------
+    // ¿/¡ are NOT ascii, so std::ispunct never saw them and the leading peel stopped on byte 0:
+    // "¿Qué" was served as ONE token to a parser whose gold has 403 standalone ¿ and 0 glued.
+    // On the es test treebanks this alone was 44 of 70 disagreements with the python reference.
+    check("¿Qué hora es?",   "¿ Qué hora es ?");
+    check("¡Hola mundo!",    "¡ Hola mundo !");
+    check("¿Cómo estás?",    "¿ Cómo estás ?");
+    check("Dime, ¿vienes?",  "Dime , ¿ vienes ?");
+    // They are not RUNNABLE: gold never merges a run of them, matching langs.py's es tokenizer.
+    check("¿¡Qué!?", "¿ ¡ Qué ! ?");
+    // A mark on its own chunk is still one token, and a closing mark peels from the right edge.
+    check("¿ Y ahora ?", "¿ Y ahora ?");
+    // Accented letters are multi-byte too and must stay inside the word — only these glyphs peel.
+    check("Corrí más rápido.", "Corrí más rápido .");
+
     printf("test_split_words: all passed\n");
     return 0;
 }
