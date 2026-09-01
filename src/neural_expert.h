@@ -97,6 +97,13 @@ struct Package {
             "\xE2\x80\x9E", "\xE2\x80\x9C", "\xE2\x80\x9D",  // „  “  ” (U+201E / U+201C / U+201D)
             "\xE2\x80\x9A", "\xE2\x80\x98", "\xE2\x80\x99",  // ‚  ‘  ’ (U+201A / U+2018 / U+2019)
             "\xE2\x80\x93", "\xE2\x80\x94", "\xC2\xA7",      // –  —  § (U+2013 / U+2014 / U+00A7)
+            // Spanish opening marks. This table is otherwise German, but these two are safe to
+            // list unconditionally: they are punctuation in every language that writes them, they
+            // occur 0x in the German treebanks (hdt+gsd), and Spanish gold has them ONLY as
+            // standalone tokens (¿ 403x, ¡ 80x in AnCora+GSD, never glued to a word). Without
+            // them the leading-peel loop stopped on byte 0 of "¿Qué" — std::ispunct is ASCII-only —
+            // and the served expert got a token the parser has never seen (glossa#es-inverted).
+            "\xC2\xBF", "\xC2\xA1",                          // ¿  ¡   (U+00BF / U+00A1)
         };
         static const std::set<std::string> RUNNABLE = {
             ".", "`", "'", "-", "\xE2\x80\x93", "\xE2\x80\x94", "\xC2\xA7"};
