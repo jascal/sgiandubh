@@ -880,6 +880,20 @@ class Transform {
                 continue;
             }
             if (subj_r.empty()) continue;
+            // A coordinated subject agrees in the plural (`La Policia y la Fiscalia
+            // investigan`); UD hangs the second conjunct off the first, so the nsubj
+            // alone reads singular. Both readings are kept, not swapped: two titles
+            // for one person really do take the singular.
+            bool coord = false;
+            for (int k : kids_of(subj))
+                if (toks[k - 1].base == "conj") { coord = true; break; }
+            if (coord) {
+                for (auto& r : std::vector<Pack::Reading>(subj_r)) {
+                    Pack::Reading pl{r.first, "Plur"};
+                    if (std::find(subj_r.begin(), subj_r.end(), pl) == subj_r.end())
+                        subj_r.push_back(pl);
+                }
+            }
             if (!compatible(subj_r, verb_r)) out.push_back(i);
         }
         return out;
