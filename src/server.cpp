@@ -775,6 +775,10 @@ int main(int argc, char** argv) {
             }
             ex->have_pack = ex->pack.load(dir + "/pack.json");
             if (ex->have_pack) {
+                // The tokenizer half of the pack. Before this, split_words was hardcoded German
+                // for every language and Spanish enclitics were never split at all
+                // (satzklar-model#25).
+                ex->np.load_tokcfg(ex->pack.j);
                 ex->lang = lang_hint.empty() ? ex->pack.j.value("lang", std::string("?")) : lang_hint;
                 fprintf(stderr, "sgiandubh: %s pack-driven transform (%s)\n",
                         ex->lang.c_str(), ex->pack.j.value("name", "").c_str());

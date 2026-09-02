@@ -28,13 +28,269 @@ struct Tensor {
     size_t numel() const { size_t n = 1; for (auto s : shape) n *= s; return n; }
 };
 
+// Tokenizer configuration read from the grammar pack. Absent (max_enclitics 0 / empty vocab)
+// means "behave exactly as before", which is what keeps deployed German byte-identical: its
+// package ships grammar.json with no `tokenizer` block, so nothing here ever engages.
+//
+// Ported from langs.py::_split_enclitics, which is the reference this must match token for token
+// (satzklar-model#25, gated by scripts/tok_parity.py).
+// The five vowels Spanish writes with an acute, upper and lower. The accent on an enclitic host
+// exists only WHILE the clitic is attached (`da` + `me` + `lo` -> `dámelo`), so splitting has to
+// take it back off — but only when the accented form is not itself a word.
+inline std::string strip_acute(const std::string& s) {
+    static const std::pair<const char*, char> MAP[] = {
+        {"\xC3\xA1", 'a'}, {"\xC3\xA9", 'e'}, {"\xC3\xAD", 'i'},
+        {"\xC3\xB3", 'o'}, {"\xC3\xBA", 'u'},
+        {"\xC3\x81", 'A'}, {"\xC3\x89", 'E'}, {"\xC3\x8D", 'I'},
+        {"\xC3\x93", 'O'}, {"\xC3\x9A", 'U'}};
+    std::string out;
+    for (size_t i = 0; i < s.size();) {
+        bool hit = false;
+        for (auto& m : MAP)
+            if (s.compare(i, 2, m.first, 2) == 0) { out += m.second; i += 2; hit = true; break; }
+        if (!hit) out += s[i++];
+    }
+    return out;
+}
+
+// Python's str.lower() folds Á -> á; a byte-wise tolower does not, and the reference lowercases
+// before every vocabulary lookup, so the two must agree on accented capitals (`Ándale`).
+inline std::string lower_utf8(const std::string& s) {
+    static const std::pair<const char*, const char*> UP[] = {
+        {"\xC3\x81", "\xC3\xA1"}, {"\xC3\x89", "\xC3\xA9"}, {"\xC3\x8D", "\xC3\xAD"},
+        {"\xC3\x93", "\xC3\xB3"}, {"\xC3\x9A", "\xC3\xBA"}};
+    std::string out;
+    for (size_t i = 0; i < s.size();) {
+        bool hit = false;
+        for (auto& u : UP)
+            if (s.compare(i, 2, u.first, 2) == 0) { out += u.second; i += 2; hit = true; break; }
+        if (hit) continue;
+        unsigned char c = (unsigned char)s[i];
+        out += (c & 0x80) ? s[i] : (char)std::tolower(c);
+        i++;
+    }
+    return out;
+}
+
+// The reference slices by CHARACTER (`word[:len(stem)]`); bytes would cut an accent in half.
+inline std::string take_chars(const std::string& s, size_t n) {
+    size_t i = 0, seen = 0;
+    while (i < s.size() && seen < n) {
+        unsigned char c = (unsigned char)s[i];
+        i += (c < 0x80) ? 1 : (c < 0xE0) ? 2 : (c < 0xF0) ? 3 : 4;
+        seen++;
+    }
+    return s.substr(0, i);
+}
+
+inline size_t count_chars(const std::string& s) {
+    size_t i = 0, n = 0;
+    while (i < s.size()) {
+        unsigned char c = (unsigned char)s[i];
+        i += (c < 0x80) ? 1 : (c < 0xE0) ? 2 : (c < 0xF0) ? 3 : 4;
+        n++;
+    }
+    return n;
+}
+
+struct TokCfg {
+    std::vector<std::string> enclitics;   // ORDER MATTERS: the reference takes the FIRST match in
+                                          // this order, not the longest, so `los` must precede `os`
+    int max_enclitics = 0;
+    int min_stem = 1;
+    std::set<std::string> vocab;          // lowercased surface forms of the language
+
+    // Every table below is EMPTY unless a pack supplied it, and empty means "use the built-in
+    // German behaviour". That is what keeps deployed German byte-identical: its package ships no
+    // tokenizer block, so each fallback below is the code that ran before this existed.
+    std::set<std::string> punct;          // note: langs.py curates this — `_` and `@` are NOT
+                                          // punctuation there, while std::ispunct says they are
+    std::set<std::string> runnable;
+    std::set<std::string> abbrev;
+    std::string apostrophes;
+    std::set<std::string> clitics;
+    bool has_punct = false, has_runnable = false, has_abbrev = false, has_clitics = false;
+    bool have_flags = false;              // ordinal_period / initial_period were supplied
+    bool ordinal_period = false;
+    bool initial_period = false;
+    std::vector<std::string> split_suffixes;
+    std::vector<std::pair<std::string, std::vector<std::string>>> split_words;
+    std::vector<std::string> split_internal;
+    std::set<std::string> internal_keep_prefixes;
+    int internal_keep_max_left = 0;
+
+    bool enclitics_on() const { return max_enclitics > 0 && !vocab.empty(); }
+    bool active() const { return enclitics_on(); }
+};
+
+// langs.py::_URLISH — an address is never split on its internal punctuation.
+inline bool urlish(const std::string& w) {
+    std::string lo;
+    for (char c : w) lo += (char)std::tolower((unsigned char)c);
+    if (lo.find("http://") != std::string::npos || lo.find("https://") != std::string::npos ||
+        lo.find("www.") != std::string::npos || lo.find('@') != std::string::npos)
+        return true;
+    for (const char* t : {".com", ".org", ".net", ".edu", ".gov", ".htm", ".html"}) {
+        size_t k = lo.find(t);
+        if (k == std::string::npos) continue;
+        size_t end = k + std::strlen(t);
+        if (end == lo.size() || !std::isalnum((unsigned char)lo[end])) return true;  // \b
+    }
+    return false;
+}
+
+// langs.py::_split_internal — UD gives many internal hyphens and slashes their own token, except
+// after a productive prefix (anti-American) or a short left part (e-mail).
+inline std::vector<std::string> split_internal(const std::string& w, const TokCfg& cfg) {
+    if (cfg.split_internal.empty() || urlish(w)) return {w};
+    auto is_sep = [&](char c) {
+        for (auto& s : cfg.split_internal) if (s.size() == 1 && s[0] == c) return true;
+        return false;
+    };
+    bool inner = false;                                   // word[1:-1], so not at either edge
+    for (size_t i = 1; i + 1 < w.size(); i++) if (is_sep(w[i])) inner = true;
+    if (!inner) return {w};
+    std::string seps;
+    for (auto& s2 : cfg.split_internal) seps += s2;
+    std::string left = w.substr(0, w.find_first_of(seps));
+    std::string llo;
+    for (char c : left) llo += (char)std::tolower((unsigned char)c);
+    if (cfg.internal_keep_prefixes.count(llo) ||
+        (int)count_chars(left) <= cfg.internal_keep_max_left)
+        return {w};
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : w) {
+        if (is_sep(c)) {
+            if (!cur.empty()) { out.push_back(cur); cur.clear(); }
+            out.push_back(std::string(1, c));
+        } else {
+            cur += c;
+        }
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+// langs.py::_split_contraction — English written contractions become the words UD annotates.
+inline std::vector<std::string> split_contraction(const std::string& w, const TokCfg& cfg) {
+    std::string lo = lower_utf8(w);
+    for (auto& sw : cfg.split_words) {
+        if (lo != sw.first) continue;
+        std::vector<std::string> out = sw.second;
+        if (!w.empty() && std::isupper((unsigned char)w[0]) && !out[0].empty())
+            out[0][0] = (char)std::toupper((unsigned char)out[0][0]);
+        return out;
+    }
+    std::vector<std::string> sufs = cfg.split_suffixes;
+    std::sort(sufs.begin(), sufs.end(),
+              [](const std::string& a, const std::string& b) { return a.size() > b.size(); });
+    for (auto& suf : sufs)
+        if (lo.size() > suf.size() && lo.compare(lo.size() - suf.size(), suf.size(), suf) == 0 &&
+            (int)count_chars(w) > (int)count_chars(suf) + cfg.min_stem - 1)
+            return {w.substr(0, w.size() - suf.size()), w.substr(w.size() - suf.size())};
+    return {w};
+}
+
+// dárselo -> [dar, se, lo]. Exact port of langs.py::_split_enclitics.
+inline std::vector<std::string> split_enclitics(const std::string& word, const TokCfg& cfg) {
+    if (!cfg.active()) return {word};
+    std::string lo = lower_utf8(word);
+    if (cfg.vocab.count(lo)) return {word};                       // already a word: leave it whole
+    for (int n = cfg.max_enclitics; n >= 1; n--) {
+        std::string stem = lo;
+        std::vector<std::string> tail;
+        bool ok = true;
+        for (int k = 0; k < n; k++) {
+            const std::string* hit = nullptr;
+            for (auto& c : cfg.enclitics)
+                if (stem.size() >= c.size() &&
+                    stem.compare(stem.size() - c.size(), c.size(), c) == 0 &&
+                    (int)count_chars(stem.substr(0, stem.size() - c.size())) >= cfg.min_stem) {
+                    hit = &c;
+                    break;                                        // FIRST match, per the reference
+                }
+            if (!hit) { ok = false; break; }
+            tail.push_back(*hit);
+            stem.erase(stem.size() - hit->size());
+        }
+        if (!ok) continue;
+        bool plain = cfg.vocab.count(stem) > 0;
+        if (!plain && !cfg.vocab.count(strip_acute(stem))) continue;
+        std::string base = take_chars(word, count_chars(stem));
+        if (!plain) base = strip_acute(base);
+        std::vector<std::string> out{base};
+        for (auto it = tail.rbegin(); it != tail.rend(); ++it) out.push_back(*it);
+        return out;
+    }
+    return {word};
+}
+
 struct Package {
     json meta;
+    TokCfg tokcfg;          // empty unless load_tokcfg() was given a pack with a tokenizer block
     std::vector<char> blob;
     std::map<std::string, Tensor> t;
     BertHandle* enc = nullptr;
     Tokenizer* tok = nullptr;
     int d = 0;
+
+    // Read the tokenizer half of the grammar pack. Called separately from load() because the
+    // pack is the transform's artifact and is loaded by the server, not by the neural package.
+    // A pack without a `tokenizer` block, or one naming no vocab_lexicon, leaves tokcfg inert —
+    // which is how deployed German keeps its exact current behaviour.
+    void load_tokcfg(const json& pack) {
+        if (!pack.contains("tokenizer")) return;
+        const json& t = pack["tokenizer"];
+        tokcfg.max_enclitics = t.value("max_enclitics", 0);
+        tokcfg.min_stem = t.value("min_stem", 1);
+        for (auto& e : t.value("enclitics", json::array()))
+            tokcfg.enclitics.push_back(e.get<std::string>());
+        auto fill = [&](const char* key, std::set<std::string>& dst) {
+            for (auto& v : t.value(key, json::array())) dst.insert(v.get<std::string>());
+        };
+        fill("punct", tokcfg.punct);
+        fill("runnable", tokcfg.runnable);
+        fill("abbrev", tokcfg.abbrev);
+        fill("clitics", tokcfg.clitics);
+        // Presence, not emptiness: `clitics: []` means this language HAS no clitics.
+        tokcfg.has_punct = t.contains("punct");
+        tokcfg.has_runnable = t.contains("runnable");
+        tokcfg.has_abbrev = t.contains("abbrev");
+        tokcfg.has_clitics = t.contains("clitics");
+        fill("internal_keep_prefixes", tokcfg.internal_keep_prefixes);
+        tokcfg.apostrophes = t.value("apostrophes", std::string());
+        tokcfg.have_flags = t.contains("ordinal_period") || t.contains("initial_period");
+        tokcfg.ordinal_period = t.value("ordinal_period", false);
+        tokcfg.initial_period = t.value("initial_period", false);
+        tokcfg.internal_keep_max_left = t.value("internal_keep_max_left", 0);
+        for (auto& v : t.value("split_suffixes", json::array()))
+            tokcfg.split_suffixes.push_back(v.get<std::string>());
+        for (auto& v : t.value("split_internal", json::array()))
+            tokcfg.split_internal.push_back(v.get<std::string>());
+        // NOT `t.value(...).items()` in the range expression: .items() returns a proxy over a
+        // temporary that dies before the loop body, and the dangling read surfaced as
+        // "type must be array, but is null". Bind the object first.
+        if (t.contains("split_words") && t["split_words"].is_object()) {
+            const json& sw = t["split_words"];
+            for (auto it = sw.begin(); it != sw.end(); ++it)
+                tokcfg.split_words.emplace_back(it.key(),
+                                                it.value().get<std::vector<std::string>>());
+        }
+        const std::string vl = t.value("vocab_lexicon", std::string());
+        if (!vl.empty() && pack.contains("lexicons") && pack["lexicons"].contains(vl)) {
+            // A lexicon is either a list of forms (`forms`) or a map keyed by form
+            // (`form2lemma`, `noun_gnum`). Either way the FORM is what the guard needs, so an
+            // object contributes its keys — iterating it would otherwise collect the values.
+            const json& lex = pack["lexicons"][vl];
+            if (lex.is_object())
+                for (auto it = lex.begin(); it != lex.end(); ++it)
+                    tokcfg.vocab.insert(lower_utf8(it.key()));
+            else
+                for (auto& w : lex)
+                    if (w.is_string()) tokcfg.vocab.insert(lower_utf8(w.get<std::string>()));
+        }
+    }
 
     bool load(const std::string& dir) {
         std::ifstream mf(dir + "/meta.json");
@@ -89,7 +345,8 @@ struct Package {
     //   R3 ordinals    digits + '.' is one token mid-sentence (27x) and NEVER sentence-final
     //                  (0 against 255 split), so the carve-out here IS justified.
     //   R4 clitics     geht's -> geht + 's, c't stays whole (see the apostrophe notes below).
-    static std::vector<std::string> split_words(const std::string& text) {
+    static std::vector<std::string> split_words(const std::string& text,
+                                               const TokCfg* cfg = nullptr) {
         // Punctuation. '-' IS peelable: gold has 1779 bare '-' tokens and only '--' ever ends one.
         // Multi-byte marks are listed explicitly because std::ispunct is byte-wise and ASCII-only.
         static constexpr std::string_view MB_PUNCT[] = {
@@ -122,32 +379,63 @@ struct Package {
         };
         // Byte length of the punctuation mark starting at i (0 if none).
         auto punct_at = [&](const std::string& s, size_t i) -> size_t {
+            if (cfg && cfg->has_punct) {                  // longest UTF-8 mark first
+                for (size_t n : {3u, 2u, 1u})
+                    if (i + n <= s.size() && cfg->punct.count(s.substr(i, n))) return n;
+                return 0;
+            }
             for (std::string_view g : MB_PUNCT)
                 if (s.compare(i, g.size(), g.data(), g.size()) == 0) return g.size();
             return is_ascii_punct((unsigned char)s[i]) ? 1 : 0;
         };
         // Byte length of the punctuation mark ENDING the string (0 if none).
         auto punct_end = [&](const std::string& s) -> size_t {
+            if (cfg && cfg->has_punct) {
+                for (size_t n : {3u, 2u, 1u})
+                    if (s.size() >= n && cfg->punct.count(s.substr(s.size() - n, n))) return n;
+                return 0;
+            }
             for (std::string_view g : MB_PUNCT)
                 if (s.size() >= g.size() &&
                     s.compare(s.size() - g.size(), g.size(), g.data(), g.size()) == 0)
                     return g.size();
             return (!s.empty() && is_ascii_punct((unsigned char)s.back())) ? 1 : 0;
         };
-        auto all_digits_dot = [](const std::string& s) {          // R3: "31."
+        auto all_digits_dot = [&](const std::string& s) {         // R3: "31." (langs _ORDINAL)
+            if (cfg && cfg->have_flags && !cfg->ordinal_period) return false;
             if (s.size() < 2 || s.back() != '.') return false;
             for (size_t k = 0; k + 1 < s.size(); k++)
                 if (!std::isdigit((unsigned char)s[k])) return false;
             return true;
         };
+        // langs _INITIAL: a single letter plus a period is an initial (`J. P. Morgan`) and keeps
+        // its period. Off unless the pack asks for it, so German is unaffected.
+        auto is_initial = [&](const std::string& s) {
+            return cfg && cfg->initial_period && s.size() == 2 && s[1] == '.' &&
+                   std::isalpha((unsigned char)s[0]);
+        };
         // R4: does an apostrophe at k introduce a bare clitic that ends the token?
         auto clitic_at = [&](const std::string& s, size_t k) -> size_t {
+            // Which characters count as an apostrophe is per language: German writes ' and ’,
+            // English also writes a backtick (`driver`s`). The pack's `apostrophes` string is
+            // the authority when present.
             size_t alen = 0;
-            if (s[k] == '\'') alen = 1;
-            else if (s.compare(k, 3, "\xE2\x80\x99", 3) == 0) alen = 3;
+            const std::string* ap = (cfg && !cfg->apostrophes.empty()) ? &cfg->apostrophes : nullptr;
+            if (ap) {
+                // ASCII only for the single-byte test: `apostrophes` holds ’ as three UTF-8
+                // bytes, and a byte-wise find would match one of its CONTINUATION bytes and cut
+                // the character in half — which showed up as invalid UTF-8 on stdout.
+                if ((unsigned char)s[k] < 0x80 && ap->find(s[k]) != std::string::npos) alen = 1;
+                else if (s.compare(k, 3, "\xE2\x80\x99", 3) == 0 &&
+                         ap->find("\xE2\x80\x99") != std::string::npos) alen = 3;
+            } else {
+                if (s[k] == '\'') alen = 1;
+                else if (s.compare(k, 3, "\xE2\x80\x99", 3) == 0) alen = 3;
+            }
             if (!alen) return 0;
             std::string rest = lower(s.substr(k + alen));
-            return CLITICS.count(rest) ? alen : 0;
+            return (cfg && cfg->has_clitics ? cfg->clitics.count(rest)
+                                            : CLITICS.count(rest)) ? alen : 0;
         };
 
         std::vector<std::string> words;
@@ -169,7 +457,8 @@ struct Package {
                 if (clitic_at(chunk, 0)) break;                   // 'ne is a token, not a quote
                 std::string mark = chunk.substr(0, plen);
                 size_t run = plen;
-                if (RUNNABLE.count(mark))                         // R1
+                if (cfg && cfg->has_runnable ? cfg->runnable.count(mark)
+                                                 : RUNNABLE.count(mark))          // R1
                     while (run < chunk.size() &&
                            chunk.compare(run, plen, mark) == 0) run += plen;
                 if (run == chunk.size()) break;                   // all punctuation: leave whole
@@ -179,11 +468,14 @@ struct Package {
             while (!chunk.empty()) {
                 size_t plen = punct_end(chunk);
                 if (!plen) break;
-                if (ABBREV.count(lower(chunk))) break;            // R2
+                if ((cfg && cfg->has_abbrev ? cfg->abbrev.count(lower_utf8(chunk))
+                                                 : ABBREV.count(lower(chunk)))) break;   // R2
+                if (is_initial(chunk)) break;                     // J. keeps its period
                 if (all_digits_dot(chunk) && !(last_chunk && trailing.empty())) break;  // R3
                 std::string mark = chunk.substr(chunk.size() - plen);
                 size_t run = plen;
-                if (RUNNABLE.count(mark))                         // R1
+                if (cfg && cfg->has_runnable ? cfg->runnable.count(mark)
+                                                 : RUNNABLE.count(mark))          // R1
                     while (run + plen <= chunk.size() &&
                            chunk.compare(chunk.size() - run - plen, plen, mark) == 0) run += plen;
                 if (run == chunk.size()) break;
@@ -195,11 +487,22 @@ struct Package {
                 size_t cut = 0, alen = 0;
                 for (size_t k = 1; k < chunk.size(); k++)
                     if ((alen = clitic_at(chunk, k))) { cut = k; break; }
+                // The reference nests these: enclitic splitting runs last, over each piece
+                // the earlier splits produced (langs.tokenize's innermost loop).
+                // langs.tokenize's nesting, in its order:
+                //   _split_internal -> _split_clitic -> _split_contraction -> _split_enclitics
+                // The clitic split is the R4 block above; the rest run here.
+                auto emit = [&](const std::string& piece) {
+                    if (!cfg) { words.push_back(piece); return; }
+                    for (auto& a : split_internal(piece, *cfg))
+                        for (auto& b : split_contraction(a, *cfg))
+                            for (auto& c : split_enclitics(b, *cfg)) words.push_back(c);
+                };
                 if (cut) {
-                    words.push_back(chunk.substr(0, cut));
-                    words.push_back(chunk.substr(cut));
+                    emit(chunk.substr(0, cut));
+                    emit(chunk.substr(cut));
                 } else {
-                    words.push_back(chunk);
+                    emit(chunk);
                 }
             }
             for (auto it = trailing.rbegin(); it != trailing.rend(); ++it) words.push_back(*it);
@@ -217,7 +520,7 @@ struct Package {
     Parse parse(const std::string& text, const std::vector<std::string>& pretok = {}) const {
         Parse r;
         auto& ab = meta["abstain"];
-        r.words = pretok.empty() ? split_words(text) : pretok;
+        r.words = pretok.empty() ? split_words(text, &tokcfg) : pretok;
         size_t n_words = r.words.size();
         if (n_words < ab["min_words"].get<size_t>() || n_words > ab["max_words"].get<size_t>()) {
             r.abstain = true; r.reason = "length"; return r;

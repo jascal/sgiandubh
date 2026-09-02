@@ -4,13 +4,25 @@
 // satzklar-model/scripts/tok_parity.py, the gate for sgiandubh#37.
 //   ./build/tok_dump < sentences.txt
 #include "neural_expert.h"
+#include <fstream>
 #include <iostream>
 #include <string>
 
-int main() {
+// Optional argv[1]: a grammar pack whose `tokenizer` block drives the split. Without it the
+// German-hardcoded behaviour is used, which is what deployed German still gets. The parity gate
+// passes the pack so it measures the SERVED configuration rather than the default one.
+int main(int argc, char** argv) {
+    nexp::Package pkg;
+    if (argc > 1) {
+        std::ifstream pf(argv[1]);
+        if (!pf) { std::cerr << "tok_dump: cannot open " << argv[1] << "\n"; return 2; }
+        nlohmann::json pack;
+        pf >> pack;
+        pkg.load_tokcfg(pack);
+    }
     std::string line;
     while (std::getline(std::cin, line)) {
-        auto w = nexp::Package::split_words(line);
+        auto w = nexp::Package::split_words(line, &pkg.tokcfg);
         for (size_t i = 0; i < w.size(); i++) {
             if (i) std::cout << ' ';
             std::cout << w[i];
