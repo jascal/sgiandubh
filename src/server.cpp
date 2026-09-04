@@ -907,6 +907,72 @@ int main(int argc, char** argv) {
                                                        {"message", json{{"role", "assistant"}, {"content", a.dump()}}}}})}};
             rs.set_content(resp.dump(), "application/json");
         });
+        // GET  /lexicon?word=Hund[&lang=de]      POST /lexicon {"words":[...],"lang":"de"}
+        //
+        // The CERTIFIED half of a dictionary: what the pack can prove about a form —
+        // lemma, morphological readings, closed-class membership, government. It is a
+        // lookup in data this process already holds, so it costs no model call and no
+        // network, and it answers in every language the server carries.
+        //
+        // Batch because a dictionary view wants a whole sentence, and doing that as N
+        // requests would pay N times for a container that is already awake.
+        auto lexicon = [&](const httplib::Request& rq, httplib::Response& rs) {
+            std::string want, single;
+            std::vector<std::string> words;
+            if (rq.method == "POST") {
+                json body = json::parse(rq.body, nullptr, false);
+                if (!body.is_discarded()) {
+                    want = body.value("lang", body.value("sourceLanguage", std::string()));
+                    if (body.contains("words") && body["words"].is_array())
+                        for (auto& w : body["words"])
+                            if (w.is_string()) words.push_back(w.get<std::string>());
+                    single = body.value("word", std::string());
+                }
+            } else {
+                want = rq.get_param_value("lang");
+                single = rq.get_param_value("word");
+            }
+            if (!single.empty()) words.push_back(single);
+
+            Expert* ex = fallback;
+            if (!want.empty()) {
+                auto it = by_lang.find(want);
+                if (it == by_lang.end()) {
+                    std::vector<std::string> langs;
+                    for (auto& [l, _e] : by_lang) langs.push_back(l);
+                    rs.status = 400;
+                    rs.set_content(json{{"error", "no package for language " + want},
+                                        {"supported", langs}}.dump(), "application/json");
+                    return;
+                }
+                ex = it->second;
+            }
+            if (!ex->have_pack) {
+                // A package predating packs carries grammar.json and no lexicons; say so
+                // rather than answering "unknown" for every word, which reads the same
+                // as a miss and is not.
+                rs.status = 501;
+                rs.set_content(json{{"error", "this package carries no pack; /lexicon needs one"},
+                                    {"lang", ex->lang}}.dump(), "application/json");
+                return;
+            }
+            if (words.empty()) {
+                rs.status = 400;
+                rs.set_content(json{{"error", "word= or words[] required"}}.dump(),
+                               "application/json");
+                return;
+            }
+            json entries = json::array();
+            {
+                std::lock_guard<std::mutex> lk(ex->mu);   // Pack memoises its reading tables
+                for (const std::string& w : words) entries.push_back(ex->pack.lexical(w));
+            }
+            rs.set_content(json{{"lang", ex->lang}, {"entries", entries}}.dump(),
+                           "application/json");
+        };
+        nsrv.Get("/lexicon", lexicon);
+        nsrv.Post("/lexicon", lexicon);
+
         nsrv.Get("/v1/models", [&](const httplib::Request&, httplib::Response& rs) {
             rs.set_content(json{{"object", "list"}, {"data", json::array({json{{"id", "sgiandubh-neural-expert"},
                                 {"object", "model"}}})}}.dump(), "application/json");
